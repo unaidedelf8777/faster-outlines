@@ -1,13 +1,9 @@
 import time
-import function_sampler
-from function_sampler.fsm import FsmTokenizer
+import faster_outlines
+from faster_outlines.fsm import FsmTokenizer
 from transformers import AutoTokenizer
-from function_sampler.json import build_regex_from_schema
-from function_sampler.cache import clear_cache, disable_cache
 from json import dumps as json_dumps
 
-disable_cache()
-clear_cache()
 s = [
     {
         "name": "get_current_weather",
@@ -62,10 +58,8 @@ s = [
     },
 ]
 
-
-function_sampler.cache.disable_cache()
-
 test_patterns = [
+    r"""[a-z0-9!#$%&'*+/=?^_{|}~-]+(?:.[a-z0-9!#$%&'*+/=?^_{|}~-]+)*@(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?""",
     r"""[a-z0-9!#$%&'*+/=?^_{|}~-]+(?:.[a-z0-9!#$%&'*+/=?^_{|}~-]+)*@(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?""",
     r"""\+?\d{1,4}?[-.\s]?\(?\d{1,3}?\)?[-.\s]?\d{1,4}[-.\s]?\d{1,4}[-.\s]?\d{1,9}""",
     r"""\+?[1-9][0-9]{7,14}""",
@@ -84,10 +78,8 @@ def test_benchmark_compile_fsm():
     """Benchmark the numba compilation time without mocker."""
 
     # Reload the module to apply the patched njit
-    from function_sampler.fsm.regex import create_fsm_index_tokenizer
+    from faster_outlines.fsm.regex import create_fsm_index_tokenizer
 
-    pattern1 = build_regex_from_schema(json_dumps(s[0]["parameters"]))
-    pattern2 = build_regex_from_schema(json_dumps(s[1]["parameters"]))
     tokenizer = FsmTokenizer(
         AutoTokenizer.from_pretrained("teknium/OpenHermes-2.5-Mistral-7B")
     )
@@ -95,24 +87,23 @@ def test_benchmark_compile_fsm():
     # Benchmark phase
     for pattern in test_patterns:
         total_time = 0
-        iterations = 4  # Set a constant number of iterations
+        iterations = 6  # Set a constant number of iterations
         for i in range(1, iterations + 1):
             print("starting timer")
             start_time = time.perf_counter()
             fsm, empty_token_ids = create_fsm_index_tokenizer(pattern, tokenizer)
-            
+            fsm.get_states_to_token_subsets()
             end_time = time.perf_counter()
             computation_time = end_time - start_time
             total_time += computation_time
-            fsm.get_states_to_token_subsets()
             
-            print(fsm)
+            
+            
+
             print(f"Time taken for Rust: {computation_time} seconds")
             print("====================================")
             print(f"first state: {0}")
             # Uncomment the following line if the decoding function and the `allowed_token_ids` method are correctly defined and relevant
-            print(f"initial tokens: {[tokenizer.decode([x])[0] for x in fsm.allowed_token_ids(0) if len(fsm.allowed_token_ids(0)) <= 10]}")
-            
             print("====================================")
             time.sleep(0.5)
 

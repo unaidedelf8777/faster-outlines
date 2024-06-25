@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use pyo3::prelude::*;
 
 use std::collections::BTreeMap;
@@ -20,17 +19,75 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Condvar, Mutex};
 
 use std::thread;
+use dashmap::DashMap;
 
 use crate::{
     tokenizer_index::create_fsm_index_end_to_end_parallel,
     types::{FSMInfo, TokenVocabulary},
 };
 
-use dashmap::DashMap;
 
-use std::time::Instant;
+pub(crate) type StateNotifierMap = Arc<DashMap<u32, Arc<(Mutex<bool>, Condvar)>>>;
 
-pub(crate) type StateNotifierMap = Arc<Mutex<BTreeMap<u32, Arc<(Mutex<bool>, Condvar)>>>>;
+
+#[pyclass]
+#[derive(Clone)]
+pub struct Write {
+    #[pyo3(get, set)]
+    pub tokens: Vec<i32>,
+}
+
+#[pymethods]
+impl Write {
+    #[new]
+    pub fn new(tokens: Vec<i32>) -> Self {
+        Write { tokens }
+    }
+
+    pub fn __repr__(&self) -> PyResult<String> {
+        Ok(format!("Write({:?})", self.tokens))
+    }
+}
+
+#[pyclass]
+#[derive(Clone)]
+pub struct Generate {
+    #[pyo3(get, set)]
+    pub tokens: Option<Vec<i32>>,
+}
+
+#[pymethods]
+impl Generate {
+    #[new]
+    pub fn new(tokens: Option<Vec<i32>>) -> Self {
+        Generate { tokens }
+    }
+
+    pub fn __repr__(&self) -> PyResult<String> {
+        Ok(format!("Generate({:?})", self.tokens))
+    }
+}
+
+pub enum Instruction {
+    Write { write: Write },
+    Generate { generate: Generate },
+}
+
+impl IntoPy<PyObject> for Instruction {
+    fn into_py(self, py: Python) -> PyObject {
+        match self {
+            Instruction::Write { write } => {
+                let py_write = Py::new(py, write).unwrap();
+                py_write.to_object(py)
+            }
+            Instruction::Generate { generate } => {
+                let py_gen = Py::new(py, generate).unwrap();
+                py_gen.to_object(py)
+            }
+        }
+    }
+}
+
 
 #[pyclass]
 #[derive(Clone, Debug)]
@@ -71,15 +128,14 @@ pub struct LazyFSMIndex {
 
 impl LazyFSMIndex {
     pub fn new(fsm_info: FSMInfo, vocabulary: TokenVocabulary, eos_token_id: u32) -> Self {
-        let start_time = Instant::now();
         let fsm_info_arc = Arc::new(fsm_info);
         let fsm_info_arc_clone = Arc::clone(&fsm_info_arc);
         let vocabulary_arc = Arc::new(vocabulary);
         let results = Arc::new(DashMap::<u32, BTreeMap<u32, u32>>::new());
-        let state_notifiers: StateNotifierMap = Arc::new(Mutex::new(BTreeMap::<
+        let state_notifiers: StateNotifierMap = Arc::new(DashMap::<
             u32,
             Arc<(Mutex<bool>, Condvar)>,
-        >::new()));
+        >::new());
         let state_notifiers_clone = Arc::clone(&state_notifiers);
 
         let computing_finished = Arc::new(Mutex::new(false));
@@ -103,7 +159,6 @@ impl LazyFSMIndex {
 
         let first_state = fsm_info_arc_clone.initial;
 
-        println!("Time to return LazyFSMIndex: {:?}", start_time.elapsed());
         LazyFSMIndex {
             states_to_token_maps: results,
             eos_token_id,
@@ -113,26 +168,26 @@ impl LazyFSMIndex {
             state_notifiers,
         }
     }
-}
-
-/// implementation of all the python methods for the LazyFSMIndex struct.
-
-#[pymethods]
-impl LazyFSMIndex {
-
 
     pub fn get_state_map(&self, state: u32) -> Option<BTreeMap<u32, u32>> {
+        // quickest return.
+        // if token list is already populated, then just return it.
+        // this way we avoid contention from locating and locking the condvar.
         if let Some(token_map) = self.states_to_token_maps.get(&state) {
             return Some(token_map.clone());
         }
 
         let notifier = {
-            let mut notifiers = self.state_notifiers.lock().unwrap();
-            Arc::clone(
-                notifiers
-                    .entry(state)
-                    .or_insert_with(|| Arc::new((Mutex::new(false), Condvar::new()))),
-            )
+            match self.state_notifiers.get(&state) {
+                Some(notifier_ref) => {
+                    // Clone the Arc that holds the Mutex and Condvar pair
+                    Arc::clone(notifier_ref.value())
+                },
+                None => {
+                    // Return None if there's no existing notifier, since it means the state will not be computed anyway.
+                    return None;
+                },
+            }
         };
 
         let (done_lock, cvar) = &*notifier;
@@ -145,8 +200,13 @@ impl LazyFSMIndex {
             .get(&state)
             .map(|ref_map| ref_map.clone()) // already know it exists, but compiler whines so this fixes.
     }
+}
 
-    pub fn next_state(&self, state: i32, token_id: u32) -> Option<i32> {
+/// implementation of all the python methods for the LazyFSMIndex struct.
+
+#[pymethods]
+impl LazyFSMIndex {
+    pub fn get_next_state(&self, state: i32, token_id: u32) -> Option<i32> {
         // check if they are alias states first ( -1, or 0 )
         // state 0 is alias for the first state
         // -1 alias for the last state.
@@ -166,8 +226,6 @@ impl LazyFSMIndex {
             state as u32
         };
 
-        
-
         // Attempt to find the next state using the get_state_map method
         self.get_state_map(current_state)
             .and_then(|map| map.get(&token_id).copied().map(|s| s as i32))
@@ -183,6 +241,34 @@ impl LazyFSMIndex {
             .or(Some(-1))
     }
 
+    pub fn get_next_instruction(&self, state: i32) -> Instruction {
+        if self.is_final_state(state) {
+            return Instruction::Write {
+                write: Write::new(vec![self.eos_token_id as i32]),
+            };
+        } else {
+            match self.get_state_map(state as u32) {
+                Some(next_tokens_to_end_states) => {
+                    // Collect all keys (token IDs) from the map and convert them to i32
+                    let allowed = next_tokens_to_end_states
+                        .keys()
+                        .cloned()
+                        .map(|k| k as i32)
+                        .collect::<Vec<i32>>();
+                    return Instruction::Generate {
+                        generate: Generate::new(Some(allowed)),
+                    };
+                }
+                None => {
+                    return Instruction::Write {
+                        write: Write::new(vec![self.eos_token_id as i32]),
+                    };
+                }
+            }
+        }
+    }
+
+    #[inline(always)]
     pub fn is_final_state(&self, state: i32) -> bool {
         // py version:
         // return state == self.final_state
@@ -211,7 +297,7 @@ impl LazyFSMIndex {
 
     pub fn allowed_token_ids(&self, state: i32) -> Vec<i32> {
         if state == -1 {
-            return vec![-2];
+            return vec![self.eos_token_id as i32];
         }
         match self.get_state_map(state as u32) {
             Some(next_tokens_to_end_states) => {
@@ -222,11 +308,35 @@ impl LazyFSMIndex {
                     .map(|k| k as i32)
                     .collect()
             }
-            None => {
-                // if allowed tokens is [-2] means
-                // no tokens are allowed.
-                vec![-2]
-            }
+            None => return vec![self.eos_token_id as i32],
         }
+    }
+
+    ///* Python Magic methods ( dunder methods ) *///
+    pub fn __repr__(&self) -> PyResult<String> {
+        // Wait for the computation to finish.
+        while !*self.computing_finished.lock().unwrap() {
+            thread::sleep(std::time::Duration::from_millis(100));
+        }
+
+        // Collecting the state maps once the computation is finished
+        let states = self.states_to_token_maps.iter()
+            .map(|entry| format!("{}: {:?}", entry.key(), entry.value()))
+            .collect::<Vec<String>>()
+            .join(", ");
+
+        // Accessing final states from the FSM info
+        let finals = self.fsm_info.finals.iter()
+            .map(|state| state.to_string())
+            .collect::<Vec<String>>()
+            .join(", ");
+
+        Ok(format!(
+            "LazyFSMIndex(first_state={}, eos_token_id={}, finals=[{}], states={{{}}})",
+            self.first_state,
+            self.eos_token_id,
+            finals,
+            states
+        ))
     }
 }

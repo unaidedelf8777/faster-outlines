@@ -17,7 +17,7 @@ def read_dependencies():
 
 
 metadata = {
-    'name': "function-sampler",
+    'name': "faster_outlines",
     'version': "0.2.1",
     'description': "Function calling Logit Sampler",
     'long_description': "", 
@@ -34,7 +34,7 @@ metadata = {
 
 rust_extensions = [
     RustExtension(
-        "function_sampler.fsm.fsm_utils",
+        "faster_outlines.fsm.fsm_utils",
         f"{CURRENT_DIR}/Cargo.toml",
         binding=Binding.PyO3,
         features=["default"],

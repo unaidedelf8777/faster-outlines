@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 /// This module provides utility functions for tokenizing input strings using a finite state machine (FSM).
 ///
 /// The `walk_fsm` function performs a FSM walk on an input string, starting from a given state, and returns a vector of accepted states.
@@ -32,16 +31,59 @@ use rayon::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Condvar, Mutex};
 
+use crate::get_or_create_vocab_trie;
 use crate::lazy_index::StateNotifierMap;
-use crate::types::{FSMInfo, TokenVocabulary, VocabTrie, VocabTrieBuilder};
+use crate::types::{FSMInfo, TokenVocabulary, TrieToken, VocabTrie};
 use crate::{lazy_index::LazyFSMIndex, types::PyFSMInfo};
 use dashmap::DashMap;
 use std::convert::TryFrom;
 
-use std::time::Instant;
+fn create_token_transition_table(
+    fsm_info: &Arc<FSMInfo>,
+    vocabulary: &Arc<TokenVocabulary>,
+    max_token_id: usize,
+) -> Vec<Option<Vec<u32>>> {
 
-#[cfg(feature = "e2e_experimental")]
-use crate::types::build_dfa;
+    let mut table: Vec<Option<Vec<u32>>> = vec![None; max_token_id];
+
+    for (token, tok_ids) in vocabulary.iter() {
+        let chars: Vec<char> = token.chars().collect(); // Collect characters into a vector
+        let char_count = chars.len(); // Get the number of characters
+        let mut token_transition_keys: Vec<u32> = Vec::with_capacity(char_count); // Preallocate memory for the vector
+
+        for symbol in &chars {
+            // Iterate over the vector of characters
+            token_transition_keys.push(
+                *fsm_info
+                    .alphabet_symbol_mapping
+                    .get(&symbol.to_string())
+                    .unwrap_or(&fsm_info.alphabet_anything_value),
+            )
+        }
+
+        for t in tok_ids {
+            table[*t as usize] = Some(token_transition_keys.clone());
+        }
+    }
+
+    table
+}
+
+/// We only need the string for the trie construction. thus this vector suffices.
+/// it acts as a map of a token string to its equivalent token ids. 
+/// we use the first token id from the vocab as the key index.
+#[inline(always)]
+fn create_vocab_to_tokenid_vector(vocab: &Arc<TokenVocabulary>, max_token_id: usize) -> Vec<Option<Vec<u32>>> {
+    let mut result_vec: Vec<Option<Vec<u32>>> = vec![None; max_token_id];
+    
+    for (_, token_ids) in vocab.as_ref() {
+        if let Some(first_id) = token_ids.get(0) {
+            result_vec[*first_id as usize] = Some(token_ids.clone());
+        }
+    }
+    
+    result_vec
+}
 
 /// This function performs a walk through a finite state machine (FSM) based on the provided input string starting from a specified state.
 ///
@@ -62,21 +104,18 @@ use crate::types::build_dfa;
 /// and transitions, ensuring that the longest possible matches are considered first.
 fn walk_fsm(
     fsm_info: &FSMInfo,
-    input_string: &str,
     start_state: u32,
+    transitions_vec: &[u32],
     full_match: bool,
 ) -> Vec<u32> {
     let mut state = start_state;
     let mut accepted_states = Vec::new();
     let mut last_final_idx = 0;
 
-    for (i, symbol) in input_string.chars().enumerate() {
-        let trans_key = fsm_info
-            .alphabet_symbol_mapping
-            .get(&symbol.to_string())
-            .unwrap_or(&fsm_info.alphabet_anything_value);
+    for i in 0..transitions_vec.len() {
+        let trans_key = transitions_vec[i];
 
-        let new_state = fsm_info.transitions.get(&(state, *trans_key));
+        let new_state = fsm_info.transitions.get(&(state, trans_key));
 
         if let Some(&new_state) = new_state {
             state = new_state;
@@ -84,15 +123,14 @@ fn walk_fsm(
                 last_final_idx = i + 1; // Store the index of the last final state encountered
             }
             accepted_states.push(state);
+        } else if !full_match && last_final_idx > 0 {
+            return accepted_states.into_iter().take(last_final_idx).collect();
         } else {
-            if !full_match && last_final_idx > 0 {
-                return accepted_states.into_iter().take(last_final_idx).collect();
-            }
             return Vec::new();
         }
     }
 
-    if full_match && last_final_idx - 1 != input_string.chars().count() - 1 {
+    if full_match && last_final_idx - 1 != transitions_vec.len() - 1 {
         Vec::new() // If full match is required and last final state is not at the end, return empty
     } else {
         accepted_states
@@ -117,30 +155,34 @@ fn walk_fsm(
 fn state_scan_tokens(
     fsm_info: &FSMInfo,
     vocab_trie: &VocabTrie,
-    vocabulary: &Arc<TokenVocabulary>,
+    vocab_vec: &Vec<Option<Vec<u32>>>,
     start_state: u32,
+    transitions_table: &[Option<Vec<u32>>],
 ) -> BTreeSet<(u32, u32)> {
     let mut results = BTreeSet::new();
     // Initialize a local stack with a copy of the indices from root_tokens
-    let mut stack: Vec<u32> = vocab_trie.get_root_tokens().clone();
+    let mut stack: Vec<TrieToken> = vocab_trie.get_root_tokens().clone();
 
     // Process the tokens using the local stack
-    while let Some(token_idx) = stack.pop() {
-        if let Some(token) = vocab_trie.get_token(token_idx) {
-            let state_seq = walk_fsm(fsm_info, token, start_state, false);
+    while let Some(t) = stack.pop() {
+        if let Some(token) = vocab_trie.get_token(t.idx) {
+            let token_transitions = &transitions_table[token.tok_id];
+            if let Some(transition_keys) = token_transitions {
+                let state_seq = walk_fsm(fsm_info, start_state, transition_keys, false);
 
-            if state_seq.len() == token.len() {
-                if let Some(token_ids) = vocabulary.get(token) {
-                    let last_state = *state_seq.last().unwrap(); // Safe to unwrap because we check length == token.len()
-                    for &token_id in token_ids {
-                        results.insert((token_id, last_state));
+                if state_seq.len() == token.str_len {
+                    if let Some(token_ids) = &vocab_vec[token.tok_id] {
+                        let last_state = *state_seq.last().unwrap(); // Safe to unwrap because we check length == token.len()
+                        for token_id in token_ids {
+                            results.insert((*token_id, last_state));
+                        }
                     }
                 }
-            }
 
-            // Always add successors to the stack
-            if let Some(next_token_idxs) = vocab_trie.find_children(token_idx) {
-                stack.extend(next_token_idxs.iter().cloned()); // Clone here is necessary to extend the stack
+                // Always add successors to the stack
+                if let Some(next_token_idxs) = vocab_trie.find_children(t.idx) {
+                    stack.extend(next_token_idxs.iter().map(|&x| x.clone()));
+                }
             }
         }
     }
@@ -169,28 +211,67 @@ pub fn create_fsm_index_end_to_end_parallel(
     return_to: &Arc<DashMap<u32, BTreeMap<u32, u32>>>,
     state_notifiers: &StateNotifierMap,
 ) {
-    let vocab_trie = Arc::new(vocabulary.to_vocab_trie());
+    let max_token_id = vocabulary
+        .values()
+        .flat_map(|ids| ids.iter())
+        .max()
+        .map(|&id| id as usize + 1)
+        .unwrap_or(0);
+    let transitions_table = Arc::new(Mutex::new(None));
+    let vocab_vec = Arc::new(Mutex::new(None));
+    let vocab_trie = Arc::new(Mutex::new(None));
+
+    // Compute the variables in parallel
+    (0..3).into_par_iter().for_each(|i| {
+        match i {
+            0 => {
+                let table = create_token_transition_table(fsm_info, vocabulary, max_token_id);
+                *transitions_table.lock().unwrap() = Some(table);
+            },
+            1 => {
+                let vec = create_vocab_to_tokenid_vector(vocabulary, max_token_id);
+                *vocab_vec.lock().unwrap() = Some(vec);
+            },
+            2 => {
+                let trie = get_or_create_vocab_trie(vocabulary);
+                *vocab_trie.lock().unwrap() = Some(trie);
+            },
+            _ => unreachable!(),
+        }
+    });
+
+    // Ensure all data structures are initialized
+    let transitions_table = transitions_table.lock().unwrap().as_ref().unwrap().clone();
+    let vocab_vec = vocab_vec.lock().unwrap().as_ref().unwrap().clone();
+    let vocab_trie = vocab_trie.lock().unwrap().as_ref().unwrap().clone();
+
     fsm_info.states.par_iter().for_each(|&start_state| {
-        let token_ids_end_states =
-            state_scan_tokens(fsm_info, &vocab_trie, vocabulary, start_state);
+        let token_ids_end_states = state_scan_tokens(
+            fsm_info,
+            &vocab_trie,
+            &vocab_vec,
+            start_state,
+            &transitions_table,
+        );
 
         let mut map = BTreeMap::new();
         for &(token_id, end_state) in &token_ids_end_states {
             map.insert(token_id, end_state);
         }
 
-        // Lock the mutex to access the map and insert the new state map
         {
             return_to.insert(start_state, map);
         }
 
         // Retrieve the notifier for the current state and notify all waiting threads
         let notifier = {
-            let mut notifiers = state_notifiers.lock().unwrap();
-            Arc::<(std::sync::Mutex<bool>, std::sync::Condvar)>::clone(
-                notifiers
+            Arc::clone(
+                state_notifiers
                     .entry(start_state)
-                    .or_insert_with(|| Arc::new((Mutex::new(false), Condvar::new()))),
+                    // technically this should never be done, since if a condvar isnt there then the state should never be computed.
+                    // but it shuts-up the compiler.
+                    .or_insert_with(|| Arc::new((Mutex::new(false), Condvar::new())))
+                    .value(),
             )
         };
 
@@ -222,26 +303,6 @@ pub fn create_fsm_index_end_to_end_py(
 ) -> LazyFSMIndex {
     py.allow_threads(move || {
         let fsm_info = FSMInfo::try_from(&py_fsm_info).unwrap();
-        let st = Instant::now();
-        let lazy_index = LazyFSMIndex::new(fsm_info, vocabulary, eos_token_id);
-        println!("time to return lazy index: {:?}", st.elapsed());
-        lazy_index
+        LazyFSMIndex::new(fsm_info, vocabulary, eos_token_id)
     })
-}
-
-#[cfg(feature = "e2e_experimental")]
-#[pyfunction(name = "pattern_to_token_subsets")]
-#[pyo3(text_signature = "(fsm_info, vocabulary, /)")]
-pub fn pattern_to_token_subsets_py(
-    py: Python<'_>,
-    pattern: String,
-    vocabulary: TokenVocabulary,
-    eos_token_id: u32,
-) -> LazyFSMIndex {
-    let results = py.allow_threads(move || {
-        let dfa = build_dfa(&pattern, false);
-        let fsm_info = FSMInfo::from_dfa(&dfa.as_ref());
-        return LazyFSMIndex::new(fsm_info, vocabulary, eos_token_id);
-    });
-    return results;
 }
