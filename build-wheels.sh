@@ -22,9 +22,3 @@ cibuildwheel --output-dir wheelhouse
 for whl in wheelhouse/*.whl; do
     auditwheel repair "$whl" -w wheelhouse/repaired/
 done
-
-# Optional: Test the wheels (this step requires that your tests are set up)
-# for whl in wheelhouse/repaired/*.whl; do
-#     pip install "$whl"
-#     run_your_tests_here  # Replace this with your actual test commands
-# done

@@ -19,7 +19,7 @@ def read_dependencies():
 metadata = {
     'name': "faster_outlines",
     'version': "0.2.1",
-    'description': "Function calling Logit Sampler",
+    'description': "Faster backend for the `Outlines` library.",
     'long_description': "", 
     'authors': ["unaidedelf8777"],
     'author_email': "thwackyy.y@gmail.com",
@@ -29,7 +29,7 @@ metadata = {
         "Programming Language :: Python :: Implementation :: CPython",
         "Programming Language :: Python :: Implementation :: PyPy",
     ],
-    'url': "https://github.com/unaidedelf8777/function-sampler/",
+    'url': "https://github.com/unaidedelf8777/faster-outlines/",
 }
 
 rust_extensions = [

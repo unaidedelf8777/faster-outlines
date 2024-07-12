@@ -1,18 +1,6 @@
-// Copyright 2024 Nathan Hoos
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
 
 use pyo3::prelude::*;
+use pyo3::{exceptions::PyKeyError, types::PyDict};
 
 use std::collections::BTreeMap;
 
@@ -29,7 +17,14 @@ use crate::{
 
 pub(crate) type StateNotifierMap = Arc<DashMap<u32, Arc<(Mutex<bool>, Condvar)>>>;
 
-
+/// Write instruction.
+///
+/// Attributes
+/// ---------
+///  - tokens
+///     The sequence of tokens to be added to the current sequence by the
+///     generation process.
+///
 #[pyclass]
 #[derive(Clone)]
 pub struct Write {
@@ -49,6 +44,14 @@ impl Write {
     }
 }
 
+/// Generate instruction
+///
+/// Attributes
+/// ----------
+/// - tokens
+///     The tokens that lead to a valid completion if generated.  A value
+///     of ``None`` indicates that all tokens are allowed.
+///
 #[pyclass]
 #[derive(Clone)]
 pub struct Generate {
@@ -92,8 +95,6 @@ impl IntoPy<PyObject> for Instruction {
 #[pyclass]
 #[derive(Clone, Debug)]
 pub struct LazyFSMIndex {
-    /// *Public fields* ///
-    /// ( public meaning they are accesable either in full or in part from python ) ///
 
     /// the mapping of states to token subsets from the tokenizer.
     /// this is an interpreted version of the FSM info.
@@ -105,9 +106,6 @@ pub struct LazyFSMIndex {
 
     /// The end-of-sequence token ID from tokenizer.
     eos_token_id: u32,
-
-    /// *Private fields* ///
-    /// ( not accesable from python )
 
     /// struct holding all info of the fsm.
     /// struct details and construction located in
@@ -136,6 +134,10 @@ impl LazyFSMIndex {
             u32,
             Arc<(Mutex<bool>, Condvar)>,
         >::new());
+        for state in fsm_info_arc.states.iter() {
+            state_notifiers.insert(*state, Arc::new((Mutex::new(false), Condvar::new())));
+        }
+        
         let state_notifiers_clone = Arc::clone(&state_notifiers);
 
         let computing_finished = Arc::new(Mutex::new(false));
@@ -202,8 +204,12 @@ impl LazyFSMIndex {
     }
 }
 
-/// implementation of all the python methods for the LazyFSMIndex struct.
-
+// implementation of all the python methods for the LazyFSMIndex struct.
+///
+/// *LazyFSMIndex*:
+///     This struct is a lazy implementation of what the outlines lib normally computes for a regex fsm.
+///     It implements both the `Guide` API used by outlines guide objects,
+///     and the `HashMap` python api, (.get(key), indexing) 
 #[pymethods]
 impl LazyFSMIndex {
     pub fn get_next_state(&self, state: i32, token_id: u32) -> Option<i32> {
@@ -312,31 +318,74 @@ impl LazyFSMIndex {
         }
     }
 
-    ///* Python Magic methods ( dunder methods ) *///
+    fn get(&self, state: u32, default: Option<PyObject>) -> PyResult<PyObject> {
+        Python::with_gil(|py| {
+            match self.get_state_map(state) {
+                Some(map) => {
+                    // Convert the BTreeMap to a Python dict
+                    let py_dict = PyDict::new_bound(py);
+                    for (k, v) in map.iter() {
+                        py_dict.set_item(*k, *v)?;
+                    }
+                    Ok(py_dict.to_object(py))
+                }
+                None => match default {
+                    Some(default_value) => Ok(default_value),
+                    None => Ok(py.None()),
+                },
+            }
+        })
+    }
+
+    ///* Python Magic methods *///
     pub fn __repr__(&self) -> PyResult<String> {
         // Wait for the computation to finish.
         while !*self.computing_finished.lock().unwrap() {
             thread::sleep(std::time::Duration::from_millis(100));
         }
-
-        // Collecting the state maps once the computation is finished
-        let states = self.states_to_token_maps.iter()
+    
+        // Collecting the first 10 state maps once the computation is finished
+        let states: String = self.states_to_token_maps.iter()
+            .take(10)
             .map(|entry| format!("{}: {:?}", entry.key(), entry.value()))
             .collect::<Vec<String>>()
             .join(", ");
-
+    
+        // Add ellipsis if there are more than 10 states
+        let states_display = if self.states_to_token_maps.len() > 10 {
+            format!("{}, ...", states)
+        } else {
+            states
+        };
+    
         // Accessing final states from the FSM info
         let finals = self.fsm_info.finals.iter()
             .map(|state| state.to_string())
             .collect::<Vec<String>>()
             .join(", ");
-
+    
         Ok(format!(
             "LazyFSMIndex(first_state={}, eos_token_id={}, finals=[{}], states={{{}}})",
             self.first_state,
             self.eos_token_id,
             finals,
-            states
+            states_display
         ))
+    }
+
+    fn __getitem__(&self, state: u32) -> PyResult<PyObject> {
+        Python::with_gil(|py| {
+            match self.get_state_map(state) {
+                Some(map) => {
+                    // Convert the BTreeMap to a Python dict
+                    let py_dict = PyDict::new_bound(py);
+                    for (k, v) in map.iter() {
+                        py_dict.set_item(*k, *v)?;
+                    }
+                    Ok(py_dict.to_object(py))
+                }
+                None => Err(PyKeyError::new_err(format!("State {} not found", state))),
+            }
+        })
     }
 }

@@ -1,29 +1,3 @@
-// Copyright 2024 Nathan Hoos
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-/// This module provides utility functions for tokenizing input strings using a finite state machine (FSM).
-///
-/// The `walk_fsm` function performs a FSM walk on an input string, starting from a given state, and returns a vector of accepted states.
-///
-/// The `state_scan_tokens` function scans a token vocabulary using the FSM and returns a set of token IDs and their corresponding end states.
-///
-/// The `create_fsm_index_end_to_end_parallel` function creates an FSM state-to-vocabulary map/index through end-to-end token parsing in parallel.
-///
-/// The `trim_vocabulary` function trims the token vocabulary by filtering out tokens that contain characters not present in the FSM's alphabet.
-///
-/// The `create_fsm_index_end_to_end_py` function is a Python interface for creating an FSM state-to-vocabulary map/index through end-to-end token parsing.
-/// It takes a pattern string, a token vocabulary, and an end-of-sequence token ID as input, and returns a LazyFSMIndex object.
 
 /// * Imports * ///
 use pyo3::prelude::*;
@@ -85,23 +59,6 @@ fn create_vocab_to_tokenid_vector(vocab: &Arc<TokenVocabulary>, max_token_id: us
     result_vec
 }
 
-/// This function performs a walk through a finite state machine (FSM) based on the provided input string starting from a specified state.
-///
-/// **Arguments:**
-/// - `fsm_info`: Reference to `FSMInfo` which holds the details about the FSM, including transitions and final states.
-/// - `input_string`: The string input to be tokenized or processed through the FSM.
-/// - `start_state`: The initial state from which the FSM walk begins.
-/// - `full_match`: A boolean that determines if the function should return results only when the entire input string is matched to a final state.
-
-/// **Returns:**
-/// - `Vec<u32>`: A vector of accepted states after processing the input string through the FSM.
-/// This vector includes states that are reached which form a part of the final states of the FSM, depending on the `full_match` requirement.
-///
-/// **Description:**
-/// The function iterates over the input string, trying to match larger substrings first to accommodate multi-character transitions in the FSM.
-/// If a substring matches and leads to a state that is a final state, it records this position. Depending on the `full_match` flag,
-/// it may return early or continue to process until all substrings are attempted. The function is sensitive to the ordering of characters
-/// and transitions, ensuring that the longest possible matches are considered first.
 fn walk_fsm(
     fsm_info: &FSMInfo,
     start_state: u32,
@@ -137,20 +94,6 @@ fn walk_fsm(
     }
 }
 
-/// This function scans a set of tokens against an FSM to determine the resulting states from a given start state.
-///
-/// **Arguments:**
-/// - `fsm_info`: Reference to `FSMInfo` containing FSM transition rules and other metadata.
-/// - `vocabulary`: Reference to `TokenVocabulary`, a collection of tokens that are to be tested against the FSM.
-/// - `start_state`: The initial state from which token scanning begins in the FSM.
-///
-/// **Returns:**
-/// - `BTreeSet<(u32, u32)>`: A set of tuples where each tuple consists of a token ID and the corresponding end state in the FSM after processing the token.
-///
-/// **Description:**
-/// The function iterates over each token in the vocabulary and applies `walk_fsm` to determine how far the token can be processed within the FSM starting from the `start_state`.
-/// If a token can be fully processed (i.e., the length of the state sequence returned by `walk_fsm` matches the token length), the end state and token ID are recorded.
-/// The results are unique due to the nature of `BTreeSet`, ensuring no duplicate entries for tokens leading to the same end state.
 #[inline(always)]
 fn state_scan_tokens(
     fsm_info: &FSMInfo,
@@ -190,60 +133,25 @@ fn state_scan_tokens(
     results
 }
 
-/// Creates a mapping of FSM states to vocabulary tokens in parallel, facilitating quick construction of state-to-token maps for large vocabularies.
-///
-/// **Arguments:**
-/// - `fsm_info`: An `Arc<FSMInfo>` encapsulating the FSM's transition rules and final states.
-/// - `vocabulary`: An `Arc<TokenVocabulary>` representing the set of tokens to be used.
-/// - `return_to`: An `Arc<Mutex<BTreeMap<u32, BTreeMap<u32, u32>>>>` where the resulting state-to-token map is stored.
-/// - `state_notifiers`: An `Arc<Mutex<BTreeMap<u32, Arc<(Mutex<bool>, Condvar)>>>>` used to notify other threads about the completion of state computations.
-///
-/// **Returns:**
-/// - `None`: The function returns nothing, but it populates `return_to` with the computed state-to-token maps and notifies other processes of completion through `state_notifiers`.
-///
-/// **Description:**
-/// The function processes each state in the FSM in parallel, applying `state_scan_tokens` to build a map from each state to possible tokens and their resultant states.
-/// It fills `return_to` with these mappings and uses `state_notifiers` to signal the completion of the computation for each state,
-///  enabling efficient multi-threaded computation and synchronization.
 pub fn create_fsm_index_end_to_end_parallel(
     fsm_info: &Arc<FSMInfo>,
     vocabulary: &Arc<TokenVocabulary>,
     return_to: &Arc<DashMap<u32, BTreeMap<u32, u32>>>,
     state_notifiers: &StateNotifierMap,
 ) {
+    
     let max_token_id = vocabulary
         .values()
         .flat_map(|ids| ids.iter())
         .max()
         .map(|&id| id as usize + 1)
         .unwrap_or(0);
-    let transitions_table = Arc::new(Mutex::new(None));
-    let vocab_vec = Arc::new(Mutex::new(None));
-    let vocab_trie = Arc::new(Mutex::new(None));
 
-    // Compute the variables in parallel
-    (0..3).into_par_iter().for_each(|i| {
-        match i {
-            0 => {
-                let table = create_token_transition_table(fsm_info, vocabulary, max_token_id);
-                *transitions_table.lock().unwrap() = Some(table);
-            },
-            1 => {
-                let vec = create_vocab_to_tokenid_vector(vocabulary, max_token_id);
-                *vocab_vec.lock().unwrap() = Some(vec);
-            },
-            2 => {
-                let trie = get_or_create_vocab_trie(vocabulary);
-                *vocab_trie.lock().unwrap() = Some(trie);
-            },
-            _ => unreachable!(),
-        }
-    });
+    // Compute the variables sequentially
+    let transitions_table = create_token_transition_table(fsm_info, vocabulary, max_token_id);
+    let vocab_vec = create_vocab_to_tokenid_vector(vocabulary, max_token_id);
+    let vocab_trie = get_or_create_vocab_trie(vocabulary);
 
-    // Ensure all data structures are initialized
-    let transitions_table = transitions_table.lock().unwrap().as_ref().unwrap().clone();
-    let vocab_vec = vocab_vec.lock().unwrap().as_ref().unwrap().clone();
-    let vocab_trie = vocab_trie.lock().unwrap().as_ref().unwrap().clone();
 
     fsm_info.states.par_iter().for_each(|&start_state| {
         let token_ids_end_states = state_scan_tokens(
@@ -283,16 +191,7 @@ pub fn create_fsm_index_end_to_end_parallel(
     });
 }
 
-/// Create an FSM state-to-vocabulary map/index through end-to-end token parsing.
-///
-/// Args:
-///     pattern (String): A string pattern to build the DFA.
-///     vocabulary (TokenVocabulary): A data structure representing the vocabulary tokens.
-///
-/// Returns:
-///     (BTreeMap<u32, BTreeMap<u32, u32>>, u32, Vec<u32>): A mapping of FSM states to vocabulary token sets,
-///     the initial state, and a vector of final states.
-/// this feature is in BETA and may not work reliably. try it yourself and see if it works for your regex.
+/// Create an FSM state-to-vocabulary map/index through end-to-end token parsing. ///
 #[pyfunction(name = "create_fsm_index_end_to_end")]
 #[pyo3(text_signature = "(fsm_info, vocabulary, /)")]
 pub fn create_fsm_index_end_to_end_py(

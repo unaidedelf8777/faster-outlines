@@ -14,7 +14,7 @@ use tokenizer_index::create_fsm_index_end_to_end_py;
 use crate::lazy_index::{LazyFSMIndex, Write, Generate};
 use crate::types::{TokenVocabulary, VocabTrie, VocabTrieBuilder};
 
-// LRU cache size
+// LRU cache for vocab tries.
 const CACHE_SIZE: usize = 100;
 
 struct ModuleState {
