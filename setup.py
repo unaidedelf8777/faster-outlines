@@ -18,7 +18,7 @@ def read_dependencies():
 
 metadata = {
     'name': "faster_outlines",
-    'version': "07.11.2024",
+    'version': "07.13.2024",
     'description': "Faster backend for the `Outlines` library.",
     'long_description': "", 
     'authors': ["unaidedelf8777"],
