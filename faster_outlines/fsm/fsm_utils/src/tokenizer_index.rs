@@ -1,8 +1,7 @@
-
 /// * Imports * ///
 use pyo3::prelude::*;
 use rayon::prelude::*;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Condvar, Mutex};
 
 use crate::get_or_create_vocab_trie;
@@ -13,11 +12,10 @@ use dashmap::DashMap;
 use std::convert::TryFrom;
 
 fn create_token_transition_table(
-    fsm_info: &Arc<FSMInfo>,
-    vocabulary: &Arc<TokenVocabulary>,
+    fsm_info: &FSMInfo,
+    vocabulary: &TokenVocabulary,
     max_token_id: usize,
 ) -> Vec<Option<Vec<u32>>> {
-
     let mut table: Vec<Option<Vec<u32>>> = vec![None; max_token_id];
 
     for (token, tok_ids) in vocabulary.iter() {
@@ -44,18 +42,21 @@ fn create_token_transition_table(
 }
 
 /// We only need the string for the trie construction. thus this vector suffices.
-/// it acts as a map of a token string to its equivalent token ids. 
+/// it acts as a map of a token string to its equivalent token ids.
 /// we use the first token id from the vocab as the key index.
 #[inline(always)]
-fn create_vocab_to_tokenid_vector(vocab: &Arc<TokenVocabulary>, max_token_id: usize) -> Vec<Option<Vec<u32>>> {
+fn create_vocab_to_tokenid_vector(
+    vocab: &TokenVocabulary,
+    max_token_id: usize,
+) -> Vec<Option<Vec<u32>>> {
     let mut result_vec: Vec<Option<Vec<u32>>> = vec![None; max_token_id];
-    
-    for (_, token_ids) in vocab.as_ref() {
+
+    for (_, token_ids) in vocab {
         if let Some(first_id) = token_ids.get(0) {
             result_vec[*first_id as usize] = Some(token_ids.clone());
         }
     }
-    
+
     result_vec
 }
 
@@ -101,8 +102,8 @@ fn state_scan_tokens(
     vocab_vec: &Vec<Option<Vec<u32>>>,
     start_state: u32,
     transitions_table: &[Option<Vec<u32>>],
-) -> BTreeSet<(u32, u32)> {
-    let mut results = BTreeSet::new();
+) -> HashSet<(u32, u32)> {
+    let mut results = HashSet::new();
     // Initialize a local stack with a copy of the indices from root_tokens
     let mut stack: Vec<TrieToken> = vocab_trie.get_root_tokens().clone();
 
@@ -134,12 +135,11 @@ fn state_scan_tokens(
 }
 
 pub fn create_fsm_index_end_to_end_parallel(
-    fsm_info: &Arc<FSMInfo>,
-    vocabulary: &Arc<TokenVocabulary>,
-    return_to: &Arc<DashMap<u32, BTreeMap<u32, u32>>>,
+    fsm_info: &FSMInfo,
+    vocabulary: &TokenVocabulary,
+    return_to: &Arc<DashMap<u32, HashMap<u32, u32>>>,
     state_notifiers: &StateNotifierMap,
 ) {
-    
     let max_token_id = vocabulary
         .values()
         .flat_map(|ids| ids.iter())
@@ -147,11 +147,9 @@ pub fn create_fsm_index_end_to_end_parallel(
         .map(|&id| id as usize + 1)
         .unwrap_or(0);
 
-    // Compute the variables sequentially
     let transitions_table = create_token_transition_table(fsm_info, vocabulary, max_token_id);
     let vocab_vec = create_vocab_to_tokenid_vector(vocabulary, max_token_id);
     let vocab_trie = get_or_create_vocab_trie(vocabulary);
-
 
     fsm_info.states.par_iter().for_each(|&start_state| {
         let token_ids_end_states = state_scan_tokens(
@@ -162,7 +160,7 @@ pub fn create_fsm_index_end_to_end_parallel(
             &transitions_table,
         );
 
-        let mut map = BTreeMap::new();
+        let mut map = HashMap::new();
         for &(token_id, end_state) in &token_ids_end_states {
             map.insert(token_id, end_state);
         }
@@ -176,8 +174,8 @@ pub fn create_fsm_index_end_to_end_parallel(
             Arc::clone(
                 state_notifiers
                     .entry(start_state)
-                    // technically this should never be done, since if a condvar isnt there then the state should never be computed.
-                    // but it shuts-up the compiler.
+                    // Technically this should never be done, since if a condvar isnt there then the state should never be computed.
+                    // But it shuts-up the compiler.
                     .or_insert_with(|| Arc::new((Mutex::new(false), Condvar::new())))
                     .value(),
             )

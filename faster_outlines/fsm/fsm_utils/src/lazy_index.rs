@@ -2,7 +2,7 @@
 use pyo3::prelude::*;
 use pyo3::{exceptions::PyKeyError, types::PyDict};
 
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 
 use std::sync::{Arc, Condvar, Mutex};
 
@@ -99,7 +99,7 @@ pub struct LazyFSMIndex {
     /// the mapping of states to token subsets from the tokenizer.
     /// this is an interpreted version of the FSM info.
     /// interpreted according to the token vocabulary.
-    states_to_token_maps: Arc<DashMap<u32, BTreeMap<u32, u32>>>,
+    states_to_token_maps: Arc<DashMap<u32, HashMap<u32, u32>>>,
 
     /// First state of the FSM
     first_state: u32,
@@ -107,10 +107,8 @@ pub struct LazyFSMIndex {
     /// The end-of-sequence token ID from tokenizer.
     eos_token_id: u32,
 
-    /// struct holding all info of the fsm.
-    /// struct details and construction located in
-    /// crate::types::FSMInfo
-    fsm_info: Arc<FSMInfo>,
+    // the final states of the fsm
+    finals: Vec<u32>,
 
     // for notifying waiters when a state is finished.
     state_notifiers: StateNotifierMap,
@@ -126,15 +124,12 @@ pub struct LazyFSMIndex {
 
 impl LazyFSMIndex {
     pub fn new(fsm_info: FSMInfo, vocabulary: TokenVocabulary, eos_token_id: u32) -> Self {
-        let fsm_info_arc = Arc::new(fsm_info);
-        let fsm_info_arc_clone = Arc::clone(&fsm_info_arc);
-        let vocabulary_arc = Arc::new(vocabulary);
-        let results = Arc::new(DashMap::<u32, BTreeMap<u32, u32>>::new());
+        let results = Arc::new(DashMap::<u32, HashMap<u32, u32>>::new());
         let state_notifiers: StateNotifierMap = Arc::new(DashMap::<
             u32,
             Arc<(Mutex<bool>, Condvar)>,
         >::new());
-        for state in fsm_info_arc.states.iter() {
+        for state in fsm_info.states.iter() {
             state_notifiers.insert(*state, Arc::new((Mutex::new(false), Condvar::new())));
         }
         
@@ -147,11 +142,15 @@ impl LazyFSMIndex {
         // this way we keep ownership of results, but the thread can still update the results var we have.
         let results_clone = Arc::clone(&results);
 
+        let first_state = fsm_info.initial.clone();
+
+        let finals = fsm_info.finals.clone();
+
         // Start the computation in a new thread
         thread::spawn(move || {
             create_fsm_index_end_to_end_parallel(
-                &fsm_info_arc,
-                &vocabulary_arc,
+                &fsm_info,
+                &vocabulary,
                 &results_clone,
                 &state_notifiers_clone,
             );
@@ -159,19 +158,17 @@ impl LazyFSMIndex {
             *computing_finished_clone.lock().unwrap() = true;
         });
 
-        let first_state = fsm_info_arc_clone.initial;
-
         LazyFSMIndex {
             states_to_token_maps: results,
-            eos_token_id,
-            fsm_info: fsm_info_arc_clone,
-            computing_finished,
             first_state,
+            eos_token_id,
+            finals,
+            computing_finished,
             state_notifiers,
         }
     }
 
-    pub fn get_state_map(&self, state: u32) -> Option<BTreeMap<u32, u32>> {
+    pub fn get_state_map(&self, state: u32) -> Option<HashMap<u32, u32>> {
         // quickest return.
         // if token list is already populated, then just return it.
         // this way we avoid contention from locating and locking the condvar.
@@ -222,7 +219,7 @@ impl LazyFSMIndex {
         }
 
         // Check if the token ID is the end-of-sequence or the state is a final state
-        if token_id == self.eos_token_id || self.fsm_info.finals.contains(&(state as u32)) {
+        if token_id == self.eos_token_id || self.finals.contains(&(state as u32)) {
             return Some(-1);
         }
 
@@ -280,21 +277,21 @@ impl LazyFSMIndex {
         // return state == self.final_state
 
         // Check if the state is the "final" or invalid state
-        state == -1 || self.fsm_info.finals.contains(&(state as u32))
+        state == -1 || self.finals.contains(&(state as u32))
     }
 
     pub fn is_computing_finished(&self) -> bool {
         *self.computing_finished.lock().unwrap()
     }
 
-    pub fn get_states_to_token_subsets(&self) -> BTreeMap<u32, BTreeMap<u32, u32>> {
+    pub fn get_states_to_token_subsets(&self) -> HashMap<u32, HashMap<u32, u32>> {
         // Wait for the computation to finish
         while !self.is_computing_finished() {
             // Sleep for a short time to avoid busy waiting
             thread::sleep(std::time::Duration::from_millis(2));
         }
 
-        // Once computation is finished, construct a BTreeMap from the DashMap
+        // Once computation is finished, construct a HashMap from the DashMap
         self.states_to_token_maps
             .iter()
             .map(|entry| (*entry.key(), entry.value().clone()))
@@ -322,7 +319,7 @@ impl LazyFSMIndex {
         Python::with_gil(|py| {
             match self.get_state_map(state) {
                 Some(map) => {
-                    // Convert the BTreeMap to a Python dict
+                    // Convert the HashMap to a Python dict
                     let py_dict = PyDict::new_bound(py);
                     for (k, v) in map.iter() {
                         py_dict.set_item(*k, *v)?;
@@ -359,7 +356,7 @@ impl LazyFSMIndex {
         };
     
         // Accessing final states from the FSM info
-        let finals = self.fsm_info.finals.iter()
+        let finals = self.finals.iter()
             .map(|state| state.to_string())
             .collect::<Vec<String>>()
             .join(", ");
@@ -377,7 +374,7 @@ impl LazyFSMIndex {
         Python::with_gil(|py| {
             match self.get_state_map(state) {
                 Some(map) => {
-                    // Convert the BTreeMap to a Python dict
+                    // Convert the HashMap to a Python dict
                     let py_dict = PyDict::new_bound(py);
                     for (k, v) in map.iter() {
                         py_dict.set_item(*k, *v)?;

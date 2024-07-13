@@ -28,13 +28,13 @@ def patch(outlines_module):
 
     Parameters:
     -----------
-    outlines_module : module
+     - outlines_module : module
         The outlines module to be patched. This should be the module object,
         not a string name.
 
     Returns:
     --------
-    module
+     - module
         The patched outlines module. Note that this is the same object that
         was passed in, modified in-place.
 

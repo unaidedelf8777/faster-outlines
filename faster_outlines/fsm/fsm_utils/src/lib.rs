@@ -1,3 +1,4 @@
+
 use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
 use std::sync::{Arc, Mutex};
@@ -5,6 +6,7 @@ use once_cell::sync::Lazy;
 use lru::LruCache;
 use pyo3::prelude::*;
 use pyo3::wrap_pyfunction;
+use std::env; 
 
 mod lazy_index;
 mod tokenizer_index;
@@ -49,6 +51,11 @@ pub fn get_or_create_vocab_trie(vocabulary: &TokenVocabulary) -> Arc<VocabTrie> 
 
 #[pymodule]
 fn fsm_utils(m: &Bound<'_, PyModule>) -> PyResult<()> {
+
+    if let Ok(threads) = env::var("FASTER_OUTLINES_NUM_THREADS") {
+        env::set_var("RAYON_NUM_THREADS", threads);
+    }
+
     // Ensure MODULE_STATE is initialized
     Lazy::force(&MODULE_STATE);
 
