@@ -52,7 +52,7 @@ fn create_vocab_to_tokenid_vector(
     let mut result_vec: Vec<Option<Vec<u32>>> = vec![None; max_token_id];
 
     for (_, token_ids) in vocab {
-        if let Some(first_id) = token_ids.get(0) {
+        if let Some(first_id) = token_ids.first() {
             result_vec[*first_id as usize] = Some(token_ids.clone());
         }
     }

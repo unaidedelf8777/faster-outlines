@@ -1,4 +1,8 @@
-from .fsm import create_fsm_index_tokenizer
+from .fsm import (
+    create_fsm_index_tokenizer,
+    Write,
+    Generate
+)
 
 
 def get_next_instruction_regexfsm(
@@ -46,7 +50,8 @@ def patch(outlines_module):
     >>> # Now, all uses of the module will use the backend from `faster_outlines` instead of default.
     """
     try:
-        
+        outlines_module.fsm.guide.Write = Write
+        outlines_module.fsm.guide.Generate = Generate
         outlines_module.fsm.guide.create_states_mapping = create_fsm_index_tokenizer
         outlines_module.fsm.guide.RegexGuide.get_next_state = get_next_state_regexfsm
         outlines_module.fsm.guide.RegexGuide.get_next_instruction = get_next_instruction_regexfsm

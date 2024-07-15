@@ -98,6 +98,7 @@ dependencies = [
  "once_cell",
  "pyo3",
  "rayon",
+ "smallvec",
 ]
 
 [[package]]
