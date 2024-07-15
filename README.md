@@ -23,6 +23,17 @@ Upcoming:
 - 🤝 Official integration with vLLM's main repo (hopefully)
 - 🌐 Same for TGI (hopefully)
 
+## Why faster_outlines?
+
+1. **Optimized for LLM Inference Servers**: Ideal for scenarios where regex patterns are dynamic and not known beforehand.
+
+2. **Asynchronous Processing**: Unlike the standard Outlines library, faster_outlines allows you to start LLM inference immediately, without waiting for the entire FSM to compile.
+
+3. **Significant Performance Boost**: Especially noticeable with complex regex patterns and large state spaces.
+
+4. **Seamless Integration**: Works with your existing Outlines code with minimal changes.
+
+
 ## Installation
 
 ```bash
@@ -43,15 +54,6 @@ patch(outlines)
 # Your code here...
 ```
 
-## Why faster_outlines?
-
-1. **Optimized for LLM Inference Servers**: Ideal for scenarios where regex patterns are dynamic and not known beforehand.
-
-2. **Asynchronous Processing**: Unlike the standard Outlines library, faster_outlines allows you to start LLM inference immediately, without waiting for the entire FSM to compile.
-
-3. **Significant Performance Boost**: Especially noticeable with complex regex patterns and large state spaces.
-
-4. **Seamless Integration**: Works with your existing Outlines code with minimal changes.
 
 ## Example
 
