@@ -1,8 +1,10 @@
 # credit: the examples in this are coming from the official outlines repo readme.
+
 import outlines
 from faster_outlines import patch
 
 patch(outlines)
+
 schema = '''{
     "title": "Character",
     "type": "object",
