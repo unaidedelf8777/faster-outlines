@@ -40,7 +40,9 @@ wheelhouse/
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
-
+node_modules/
+package.json
+package-lock.json
 # Unit test / coverage reports
 htmlcov/
 .tox/

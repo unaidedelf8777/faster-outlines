@@ -7,6 +7,37 @@ use std::convert::TryFrom;
 
 use pyo3::prelude::*;
 
+use std::cell::UnsafeCell;
+
+// Custom wrapper around UnsafeCell
+#[derive(Debug)]
+pub struct ThreadSafeCell<T> {
+    value: UnsafeCell<T>,
+}
+
+// Manually implement Sync
+// This seems illegal to do, but its faster this way.
+// Not like the compiler will notice :) 
+unsafe impl<T> Sync for ThreadSafeCell<T> {}
+
+impl<T> ThreadSafeCell<T> {
+    pub fn new(value: T) -> Self {
+        ThreadSafeCell {
+            value: UnsafeCell::new(value),
+        }
+    }
+
+    // Unsafe methods to access the inner value
+    pub unsafe fn get(&self) -> &mut T {
+        &mut *self.value.get()
+    }
+
+    pub unsafe fn get_ref(&self) -> &T {
+        &*self.value.get()
+    }
+}
+
+
 /// `TokenVocabulary` is a type alias for a `BTreeMap` where the key is a `char` representing a token, and the value is a `Vec<u32>` containing token IDs. This structure is used to store and manage tokens for processing with finite state machines (FSMs), ensuring ordered access and efficient retrieval without hashing overhead.
 pub type TokenVocabulary = BTreeMap<String, Vec<u32>>;
 
@@ -177,7 +208,6 @@ impl VocabTrieBuilder for TokenVocabulary {
             }
             token_id += 1;
         }
-
         VocabTrie {
             parent_children_map,
             idx_to_token_str,

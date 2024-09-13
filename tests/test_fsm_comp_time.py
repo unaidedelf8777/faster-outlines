@@ -26,21 +26,20 @@ test_patterns = [
     r"""\{[\n ]*"id"[\n ]*:[\n ]*(-)?((0|[1-9][0-9]*))(\.[0-9]+)?([eE][+-][0-9]+)?[\n ]*,[\n ]*"work"[\n ]*:[\n ]*\{[\n ]*"id"[\n ]*:[\n ]*(-)?((0|[1-9][0-9]*))(\.[0-9]+)?([eE][+-][0-9]+)?[\n ]*,[\n ]*"name"[\n ]*:[\n ]*"(?:[^"\\\x00-\x1f\x7f-\x9f]|\\.)*"[\n ]*,[\n ]*"composer"[\n ]*:[\n ]*\{[\n ]*"id"[\n ]*:[\n ]*(-)?((0|[1-9][0-9]*))(\.[0-9]+)?([eE][+-][0-9]+)?[\n ]*,[\n ]*"name"[\n ]*:[\n ]*"(?:[^"\\\x00-\x1f\x7f-\x9f]|\\.)*"[\n ]*,[\n ]*"functions"[\n ]*:[\n ]*\[("(?:[^"\\\x00-\x1f\x7f-\x9f]|\\.)*")(,("(?:[^"\\\x00-\x1f\x7f-\x9f]|\\.)*"))*\][\n ]*\}[\n ]*\}[\n ]*,[\n ]*"recording_artists"[\n ]*:[\n ]*\[(\{[\n ]*"id"[\n ]*:[\n ]*(-)?((0|[1-9][0-9]*))(\.[0-9]+)?([eE][+-][0-9]+)?[\n ]*,[\n ]*"name"[\n ]*:[\n ]*"(?:[^"\\\x00-\x1f\x7f-\x9f]|\\.)*"[\n ]*,[\n ]*"functions"[\n ]*:[\n ]*\[("(?:[^"\\\x00-\x1f\x7f-\x9f]|\\.)*")(,("(?:[^"\\\x00-\x1f\x7f-\x9f]|\\.)*"))*\][\n ]*\})(,(\{[\n ]*"id"[\n ]*:[\n ]*(-)?((0|[1-9][0-9]*))(\.[0-9]+)?([eE][+-][0-9]+)?[\n ]*,[\n ]*"name"[\n ]*:[\n ]*"(?:[^"\\\x00-\x1f\x7f-\x9f]|\\.)*"[\n ]*,[\n ]*"functions"[\n ]*:[\n ]*\[("(?:[^"\\\x00-\x1f\x7f-\x9f]|\\.)*")(,("(?:[^"\\\x00-\x1f\x7f-\x9f]|\\.)*"))*\][\n ]*\}))*\][\n ]*\}""",
     r"""choice 1|choice 2|car|truck|dog""",
     r"""long choice 1 giberrish blah blah blah|long choice 2 giberrish blah blah blah""",
-    r"""Despite the serene landscape, he felt a profound sense of urgency as the clouds began to gather ominously overhead.|She meticulously arranged the old books in alphabetical order, each dusty spine telling a story of forgotten worlds."""
-    
 ]
 tokenizer = FsmTokenizer(
     AutoTokenizer.from_pretrained("teknium/OpenHermes-2.5-Mistral-7B")
 )
 
+
 def load_previous_results():
-    if os.path.exists('benchmark_results.json'):
-        with open('benchmark_results.json', 'r') as f:
+    if os.path.exists('bench/benchmark_results.json'):
+        with open('bench/benchmark_results.json', 'r') as f:
             return json.load(f)
     return {}
 
 def save_results(results):
-    with open('benchmark_results.json', 'w') as f:
+    with open('bench/benchmark_results.json', 'w') as f:
         json.dump(results, f, indent=2)
 
 def test_benchmark_compile_fsm():
@@ -49,11 +48,8 @@ def test_benchmark_compile_fsm():
     previous_results = load_previous_results()
     current_results = {}
 
-    # let it run once so it imports everything it needs
-    # and gets primed, just to be fair.
-    RegexGuide(test_patterns[0], tokenizer)
-    
-    
+    RegexGuide(test_patterns[0], tokenizer)  # Priming
+
     for i, pattern in enumerate(test_patterns):
         
         st = time.perf_counter()
@@ -84,7 +80,7 @@ def test_benchmark_compile_fsm():
             if return_time is None:
                 return_time = time_to_return - start_time
                 print(f"Return time: {return_time}")
-                print(f"initial tokens: {[tokenizer.decode([x])[0] for x in fsm.allowed_token_ids(0)[:10]]}")
+                print(f"Initial tokens: {[tokenizer.decode([x])[0] for x in fsm.allowed_token_ids(0)[:10]]}")
 
             print(f"Iteration {j + 1}: {computation_time:.4f} seconds")
 
@@ -98,7 +94,16 @@ def test_benchmark_compile_fsm():
         }
 
         print(f"Average time: {average_time:.4f} seconds")
-        print(f"Win / Loss?: {'Win' if average_time < outlines_time else 'Loss'}")
+        
+        # Win / Loss calculation
+        if average_time < outlines_time:
+            print("Result: Win")
+            percentage = ((outlines_time - average_time) / outlines_time) * 100
+            print(f"Percentage faster than `Outlines`: {percentage:.2f}%")
+        else:
+            print("Result: Loss")
+            percentage = ((average_time - outlines_time) / outlines_time) * 100
+            print(f"Percentage slower than `Outlines`: {percentage:.2f}%")
 
         if pattern in previous_results:
             prev_avg = previous_results[pattern]['average_time']

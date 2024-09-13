@@ -65,8 +65,6 @@ class TransformerTokenizer(Tokenizer):
 
         self.vocabulary = self.tokenizer.get_vocab()
 
-        self.__hash__()
-
     def encode(
         self, prompt: Union[str, List[str]], **kwargs
     ) -> Tuple[torch.LongTensor, torch.LongTensor]:

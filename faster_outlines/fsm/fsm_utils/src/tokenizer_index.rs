@@ -1,14 +1,13 @@
 /// * Imports * ///
 use pyo3::prelude::*;
 use rayon::prelude::*;
-use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Condvar, Mutex};
+use rustc_hash::{FxHashMap, FxHashSet};
+use std::sync::Arc;
 
-use crate::get_or_create_vocab_trie;
+use crate::caching::get_or_create_vocab_trie;
 use crate::lazy_index::StateNotifierMap;
-use crate::types::{FSMInfo, TokenVocabulary, TrieToken, VocabTrie};
+use crate::types::{FSMInfo, ThreadSafeCell, TokenVocabulary, TrieToken, VocabTrie};
 use crate::{lazy_index::LazyFSMIndex, types::PyFSMInfo};
-use dashmap::DashMap;
 use std::convert::TryFrom;
 
 fn create_token_transition_table(
@@ -102,8 +101,13 @@ fn state_scan_tokens(
     vocab_vec: &Vec<Option<Vec<u32>>>,
     start_state: u32,
     transitions_table: &[Option<Vec<u32>>],
-) -> HashSet<(u32, u32)> {
-    let mut results = HashSet::new();
+) -> FxHashSet<(u32, u32)> {
+    // In this implementation, unlike outlines which iterates through every token in the tokenizer,
+    // for each state, we use a Trie of the vocabulary, so that our searching is more efficient.
+    // this way we are not wasting time on tokens which have prefixes which are not-useable / non-matching.
+    // this is very helpful in terms of efficiency for characters such as `{`, for which there may only be a few
+    // matching tokens in the tokenizer.
+    let mut results = FxHashSet::default();
     // Initialize a local stack with a copy of the indices from root_tokens
     let mut stack: Vec<TrieToken> = vocab_trie.get_root_tokens().clone();
 
@@ -137,9 +141,10 @@ fn state_scan_tokens(
 pub fn create_fsm_index_end_to_end_parallel(
     fsm_info: &FSMInfo,
     vocabulary: &TokenVocabulary,
-    return_to: &Arc<DashMap<u32, HashMap<u32, u32>>>,
+    return_to: &Arc<Vec<ThreadSafeCell<FxHashMap<u32, u32>>>>,
     state_notifiers: &StateNotifierMap,
 ) {
+
     let max_token_id = vocabulary
         .values()
         .flat_map(|ids| ids.iter())
@@ -152,6 +157,7 @@ pub fn create_fsm_index_end_to_end_parallel(
     let vocab_trie = get_or_create_vocab_trie(vocabulary);
 
     fsm_info.states.par_iter().for_each(|&start_state| {
+        // Compute token_ids_end_states
         let token_ids_end_states = state_scan_tokens(
             fsm_info,
             &vocab_trie,
@@ -160,28 +166,16 @@ pub fn create_fsm_index_end_to_end_parallel(
             &transitions_table,
         );
 
-        let mut map = HashMap::new();
-        for &(token_id, end_state) in &token_ids_end_states {
-            map.insert(token_id, end_state);
+        // Unsafe mutable access without locking
+        unsafe {
+            let map = return_to[start_state as usize].get();
+            for &(token_id, end_state) in &token_ids_end_states {
+                map.insert(token_id, end_state);
+            }
         }
 
-        {
-            return_to.insert(start_state, map);
-        }
-
-        // Retrieve the notifier for the current state and notify all waiting threads
-        let notifier = {
-            Arc::clone(
-                state_notifiers
-                    .entry(start_state)
-                    // Technically this should never be done, since if a condvar isnt there then the state should never be computed.
-                    // But it shuts-up the compiler.
-                    .or_insert_with(|| Arc::new((Mutex::new(false), Condvar::new())))
-                    .value(),
-            )
-        };
-
-        // Set the state to done and notify all waiters
+        // Notify that the state is done
+        let notifier = Arc::clone(&state_notifiers[start_state as usize]);
         let (done_lock, condvar) = &*notifier;
         let mut done = done_lock.lock().unwrap();
         *done = true;

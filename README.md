@@ -21,7 +21,8 @@ Key features:
 Upcoming:
 - 🍴 vLLM fork using faster_outlines
 - 🤝 Official integration with vLLM's main repo (hopefully)
-- 🌐 Same for TGI (hopefully)
+- Better FSM Caching
+- Redis as a caching backend, for large inference setups
 
 ## Why faster_outlines?
 
@@ -125,7 +126,7 @@ For even faster compilation times on machines with more powerful CPUs ( such as 
 However, if you would like to manually control the number of threads used, you can do so via environment variable:
 
 ```bash
-export FASTER_OUTLINES_NUM_THREADS=8
+export FASTER_OUTLINES_NUM_THREADS=<num-threads>
 ```
 
 Please note that setting the number of threads to a number higher than the number of cores / logical threads on your machine **WILL DETERIORATE PERFORMANCE**, not improve it.

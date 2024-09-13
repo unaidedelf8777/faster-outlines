@@ -1,21 +1,18 @@
-
 use pyo3::prelude::*;
 use pyo3::{exceptions::PyKeyError, types::PyDict};
 
-use std::collections::HashMap;
+use rustc_hash::{FxHashMap};
 
 use std::sync::{Arc, Condvar, Mutex};
 
 use std::thread;
-use dashmap::DashMap;
 
 use crate::{
     tokenizer_index::create_fsm_index_end_to_end_parallel,
-    types::{FSMInfo, TokenVocabulary},
+    types::{FSMInfo, TokenVocabulary, ThreadSafeCell},
 };
 
-
-pub(crate) type StateNotifierMap = Arc<DashMap<u32, Arc<(Mutex<bool>, Condvar)>>>;
+pub(crate) type StateNotifierMap = Arc<Vec<Arc<(Mutex<bool>, Condvar)>>>;
 
 /// Write instruction.
 ///
@@ -91,15 +88,13 @@ impl IntoPy<PyObject> for Instruction {
     }
 }
 
-
 #[pyclass]
 #[derive(Clone, Debug)]
 pub struct LazyFSMIndex {
-
     /// the mapping of states to token subsets from the tokenizer.
     /// this is an interpreted version of the FSM info.
     /// interpreted according to the token vocabulary.
-    states_to_token_maps: Arc<DashMap<u32, HashMap<u32, u32>>>,
+    states_to_token_maps: Arc<Vec<ThreadSafeCell<FxHashMap<u32, u32>>>>,
 
     /// First state of the FSM
     first_state: u32,
@@ -124,26 +119,22 @@ pub struct LazyFSMIndex {
 
 impl LazyFSMIndex {
     pub fn new(fsm_info: FSMInfo, vocabulary: TokenVocabulary, eos_token_id: u32) -> Self {
-        let results = Arc::new(DashMap::<u32, HashMap<u32, u32>>::new());
-        let state_notifiers: StateNotifierMap = Arc::new(DashMap::<
-            u32,
-            Arc<(Mutex<bool>, Condvar)>,
-        >::new());
-        for state in fsm_info.states.iter() {
-            state_notifiers.insert(*state, Arc::new((Mutex::new(false), Condvar::new())));
-        }
-        
-        let state_notifiers_clone = Arc::clone(&state_notifiers);
+        // Initialize results with ThreadSafeCell
+        let results = Arc::new(
+            (0..fsm_info.states.len())
+                .map(|_| ThreadSafeCell::new(FxHashMap::default()))
+                .collect::<Vec<_>>()
+        );
 
+        let state_notifiers: Arc<Vec<Arc<(Mutex<bool>, Condvar)>>> = Arc::new(
+            fsm_info.states.iter().map(|_| Arc::new((Mutex::new(false), Condvar::new()))).collect()
+        );
+
+        let state_notifiers_clone = Arc::clone(&state_notifiers);
         let computing_finished = Arc::new(Mutex::new(false));
         let computing_finished_clone = Arc::clone(&computing_finished);
-
-        // Clone the results so we can pass it to the thread.
-        // this way we keep ownership of results, but the thread can still update the results var we have.
         let results_clone = Arc::clone(&results);
-
-        let first_state = fsm_info.initial.clone();
-
+        let first_state = fsm_info.initial;
         let finals = fsm_info.finals.clone();
 
         // Start the computation in a new thread
@@ -168,36 +159,31 @@ impl LazyFSMIndex {
         }
     }
 
-    pub fn get_state_map(&self, state: u32) -> Option<HashMap<u32, u32>> {
-        // quickest return.
-        // if token list is already populated, then just return it.
-        // this way we avoid contention from locating and locking the condvar.
-        if let Some(token_map) = self.states_to_token_maps.get(&state) {
-            return Some(token_map.clone());
+    pub fn get_state_map(&self, state: u32) -> Option<FxHashMap<u32, u32>> {
+        // Check if the state index is valid
+        if state as usize >= self.states_to_token_maps.len() {
+            return None;
         }
 
+        // Retrieve the notifier for the current state
         let notifier = {
-            match self.state_notifiers.get(&state) {
-                Some(notifier_ref) => {
-                    // Clone the Arc that holds the Mutex and Condvar pair
-                    Arc::clone(notifier_ref.value())
-                },
-                None => {
-                    // Return None if there's no existing notifier, since it means the state will not be computed anyway.
-                    return None;
-                },
+            match self.state_notifiers.get(state as usize) {
+                Some(notifier_ref) => Arc::clone(notifier_ref),
+                None => return None,
             }
         };
 
+        // Wait until the state is computed
         let (done_lock, cvar) = &*notifier;
         let mut done = done_lock.lock().unwrap();
         while !*done {
             done = cvar.wait(done).unwrap();
         }
 
-        self.states_to_token_maps
-            .get(&state)
-            .map(|ref_map| ref_map.clone()) // already know it exists, but compiler whines so this fixes.
+        // Now it's safe to read from the HashMap
+        let cell = &self.states_to_token_maps[state as usize];
+        let map = unsafe { &*cell.get_ref() };
+        Some(map.clone())
     }
 }
 
@@ -206,7 +192,7 @@ impl LazyFSMIndex {
 /// *LazyFSMIndex*:
 ///     This struct is a lazy implementation of what the outlines lib normally computes for a regex fsm.
 ///     It implements both the `Guide` API used by outlines guide objects,
-///     and the `HashMap` python api, (.get(key), indexing) 
+///     and the `HashMap` python api, (.get(key), indexing)
 #[pymethods]
 impl LazyFSMIndex {
     pub fn get_next_state(&self, state: i32, token_id: u32) -> Option<i32> {
@@ -283,18 +269,19 @@ impl LazyFSMIndex {
     pub fn is_computing_finished(&self) -> bool {
         *self.computing_finished.lock().unwrap()
     }
-
-    pub fn get_states_to_token_subsets(&self) -> HashMap<u32, HashMap<u32, u32>> {
-        // Wait for the computation to finish
+    /// NOTE: THIS IS NOT VERY PERFORMANT!
+    pub fn get_states_to_token_subsets(&self) -> FxHashMap<u32, FxHashMap<u32, u32>> {
         while !self.is_computing_finished() {
-            // Sleep for a short time to avoid busy waiting
             thread::sleep(std::time::Duration::from_millis(2));
         }
 
-        // Once computation is finished, construct a HashMap from the DashMap
         self.states_to_token_maps
             .iter()
-            .map(|entry| (*entry.key(), entry.value().clone()))
+            .enumerate()
+            .map(|(index, cell)| {
+                let map = unsafe { &*cell.get_ref() };
+                (index as u32, map.clone())
+            })
             .collect()
     }
 
@@ -336,37 +323,38 @@ impl LazyFSMIndex {
 
     ///* Python Magic methods *///
     pub fn __repr__(&self) -> PyResult<String> {
-        // Wait for the computation to finish.
-        while !*self.computing_finished.lock().unwrap() {
+        while !self.is_computing_finished() {
             thread::sleep(std::time::Duration::from_millis(100));
         }
-    
-        // Collecting the first 10 state maps once the computation is finished
-        let states: String = self.states_to_token_maps.iter()
+
+        let states: String = self
+            .states_to_token_maps
+            .iter()
             .take(10)
-            .map(|entry| format!("{}: {:?}", entry.key(), entry.value()))
+            .enumerate()
+            .map(|(index, cell)| {
+                let state_map = unsafe { &*cell.get_ref() };
+                format!("{}: {:?}", index, state_map)
+            })
             .collect::<Vec<String>>()
             .join(", ");
-    
-        // Add ellipsis if there are more than 10 states
+
         let states_display = if self.states_to_token_maps.len() > 10 {
             format!("{}, ...", states)
         } else {
             states
         };
-    
-        // Accessing final states from the FSM info
-        let finals = self.finals.iter()
+
+        let finals = self
+            .finals
+            .iter()
             .map(|state| state.to_string())
             .collect::<Vec<String>>()
             .join(", ");
-    
+
         Ok(format!(
             "LazyFSMIndex(first_state={}, eos_token_id={}, finals=[{}], states={{{}}})",
-            self.first_state,
-            self.eos_token_id,
-            finals,
-            states_display
+            self.first_state, self.eos_token_id, finals, states_display
         ))
     }
 
