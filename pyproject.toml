@@ -3,7 +3,7 @@ name = "faster_outlines"
 packages = [
     { include = "faster_outlines" },
 ]
-version = "07.13.2024"
+version = "07.18.2024"
 description = "Make The `Outlines` Library FASTER!"
 authors = ["Nathan Hoos <thwackyy.y@gmail.com>"]
 license = "Apache 2.0"
