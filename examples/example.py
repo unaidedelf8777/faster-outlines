@@ -42,7 +42,7 @@ schema = '''{
     }
 }'''
 
-model = outlines.models.transformers("mistralai/Mistral-7B-Instruct-v0.2", device="cuda:0", model_kwargs={"load_in_8bit": True})
+model = outlines.models.transformers("teknium/OpenHermes-2.5-Mistral-7B", device="cuda:0", model_kwargs={"load_in_8bit": True})
 print("Model loaded.")
 generator = outlines.generate.json(model, schema)
 character = generator("Give me a character description")

@@ -11,6 +11,8 @@ from .regex import (
     FSMState
 )
 
+from .guide import RegexGuide
 
 
-__all__ = [ "FsmTokenizer", "create_fsm_index_tokenizer", "FSMState", "Generate", "Write"]
+
+__all__ = [ "FsmTokenizer", "create_fsm_index_tokenizer", "FSMState", "Generate", "Write", "RegexGuide"]

@@ -32,7 +32,7 @@ const outlinesTimes = data.map(item => item.outlinesTime); // Y-axis (Outlines l
 // Create the dataset for the graph, including the baseline (0.02 seconds)
 const datasets = [
     {
-        label: 'Faster-Outlines (num-threads: auto)',
+        label: 'Faster-Outlines (num-threads: 1)',
         data: times,
         fill: false,
         borderColor: 'rgb(255, 99, 132)',  // Red color for your implementation
@@ -103,8 +103,8 @@ chart.setConfig({
         }
     }
 }).setBackgroundColor('#2c2c2c')  // Dark mode background
-  .setWidth(800)
-  .setHeight(600);
+  .setWidth(500)
+  .setHeight(400);
 
 // Render and save chart as an image
 chart.toFile('assets/benchmark.png')

@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::{exceptions::PyKeyError, types::PyDict};
 
-use rustc_hash::{FxHashMap};
+use rustc_hash::FxHashMap;
 
 use std::sync::{Arc, Condvar, Mutex};
 
@@ -10,6 +10,7 @@ use std::thread;
 use crate::{
     tokenizer_index::create_fsm_index_end_to_end_parallel,
     types::{FSMInfo, TokenVocabulary, ThreadSafeCell},
+    caching::{get_cached_fsm, MODULE_STATE, CachedFSM, hash_token_vocabulary}
 };
 
 pub(crate) type StateNotifierMap = Arc<Vec<Arc<(Mutex<bool>, Condvar)>>>;
@@ -119,43 +120,90 @@ pub struct LazyFSMIndex {
 
 impl LazyFSMIndex {
     pub fn new(fsm_info: FSMInfo, vocabulary: TokenVocabulary, eos_token_id: u32) -> Self {
-        // Initialize results with ThreadSafeCell
-        let results = Arc::new(
-            (0..fsm_info.states.len())
-                .map(|_| ThreadSafeCell::new(FxHashMap::default()))
-                .collect::<Vec<_>>()
-        );
 
-        let state_notifiers: Arc<Vec<Arc<(Mutex<bool>, Condvar)>>> = Arc::new(
-            fsm_info.states.iter().map(|_| Arc::new((Mutex::new(false), Condvar::new()))).collect()
-        );
+        let cache_key = hash_token_vocabulary(&vocabulary, &fsm_info.pattern);
 
-        let state_notifiers_clone = Arc::clone(&state_notifiers);
-        let computing_finished = Arc::new(Mutex::new(false));
-        let computing_finished_clone = Arc::clone(&computing_finished);
-        let results_clone = Arc::clone(&results);
-        let first_state = fsm_info.initial;
-        let finals = fsm_info.finals.clone();
+        let cache_entry = {
+            get_cached_fsm(cache_key)
+        };
 
-        // Start the computation in a new thread
-        thread::spawn(move || {
-            create_fsm_index_end_to_end_parallel(
-                &fsm_info,
-                &vocabulary,
-                &results_clone,
-                &state_notifiers_clone,
+        if let Some(cached_fsm) = cache_entry {
+            let states_to_token_maps: Arc<Vec<ThreadSafeCell<FxHashMap<u32,u32>>>> = Arc::new(
+                cached_fsm.states_to_token_maps
+                    .iter()
+                    .map(|map| ThreadSafeCell::new(map.clone()))
+                    .collect()
             );
 
-            *computing_finished_clone.lock().unwrap() = true;
-        });
+            let state_notifiers = Arc::new(
+                (0..states_to_token_maps.len())
+                    .map(|_| Arc::new((Mutex::new(true), Condvar::new())))
+                    .collect()
+            );
 
-        LazyFSMIndex {
-            states_to_token_maps: results,
-            first_state,
-            eos_token_id,
-            finals,
-            computing_finished,
-            state_notifiers,
+            LazyFSMIndex {
+                states_to_token_maps,
+                first_state: cached_fsm.first_state,
+                eos_token_id,
+                finals: cached_fsm.finals.clone(),
+                computing_finished: Arc::new(Mutex::new(true)),
+                state_notifiers,
+            }
+        } else {
+            let results = Arc::new(
+                (0..fsm_info.states.len())
+                    .map(|_| ThreadSafeCell::new(FxHashMap::default()))
+                    .collect::<Vec<_>>(),
+            );
+
+            let state_notifiers = Arc::new(
+                (0..fsm_info.states.len())
+                    .map(|_| Arc::new((Mutex::new(false), Condvar::new())))
+                    .collect(),
+            );
+
+            let state_notifiers_clone = Arc::clone(&state_notifiers);
+            let computing_finished = Arc::new(Mutex::new(false));
+            let computing_finished_clone = Arc::clone(&computing_finished);
+            let results_clone = Arc::clone(&results);
+            let first_state = fsm_info.initial;
+            let finals = Arc::new(fsm_info.finals.clone()); 
+
+            let finals_clone = Arc::clone(&finals);
+
+            let cache_key_clone = cache_key;
+
+            thread::spawn(move || {
+                create_fsm_index_end_to_end_parallel(
+                    &fsm_info,
+                    &vocabulary,
+                    &results_clone,
+                    &state_notifiers_clone,
+                );
+
+                let cached_fsm = CachedFSM {
+                    states_to_token_maps: results_clone
+                        .iter()
+                        .map(|cell| unsafe { &*cell.get_ref() }.clone())
+                        .collect(),
+                    first_state,
+                    finals: finals_clone.to_vec(), 
+                };
+
+                let mut cache = MODULE_STATE.fsm_cache.lock().unwrap();
+                cache.put(cache_key_clone, Arc::new(cached_fsm));
+
+                *computing_finished_clone.lock().unwrap() = true;
+            });
+            let finals = finals.to_vec();
+            LazyFSMIndex {
+                states_to_token_maps: results,
+                first_state,
+                eos_token_id,
+                finals, 
+                computing_finished,
+                state_notifiers,
+            }
         }
     }
 

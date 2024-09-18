@@ -31,6 +31,7 @@ tokenizer = FsmTokenizer(
     AutoTokenizer.from_pretrained("teknium/OpenHermes-2.5-Mistral-7B")
 )
 
+print(f"Benchmarking tokenizer length: {len(tokenizer.tokenizer)}")
 
 def load_previous_results():
     if os.path.exists('bench/benchmark_results.json'):
@@ -69,7 +70,6 @@ def test_benchmark_compile_fsm():
         for j in range(iterations):
             start_time = time.perf_counter()
             fsm, empty_token_ids, fsm_finals = create_fsm_index_tokenizer(pattern, tokenizer)
-            fsm.get_next_instruction(0)
             time_to_return = time.perf_counter()
             fsm.get_states_to_token_subsets()
             end_time = time.perf_counter()

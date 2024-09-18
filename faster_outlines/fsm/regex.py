@@ -113,11 +113,16 @@ def create_fsm_info(
     py_anything_value,
     alphabet_symbol_mapping_items,
 ):
+    states = set()
     trans_key_to_states = {}
     for trans_key, state in trans_key_to_states_items:
         if trans_key not in trans_key_to_states:
             trans_key_to_states[trans_key] = []
         trans_key_to_states[trans_key].append(state)
+    
+    for from_state, _, to_state in flat_transition_map_items:
+        states.add(from_state)
+        states.add(to_state)
 
     flat_transition_map = {
         (from_state, trans_key): to_state
@@ -129,12 +134,14 @@ def create_fsm_info(
     }
 
     initial = py_initial
-    finals = set(py_finals)
+    finals = list(set(py_finals))
     anything_value = py_anything_value
-
+    states = list(states)
+    states.sort()
     return {
         "initial": initial,
         "finals": finals,
+        "states": states, # Don't give the final state, as it has no actual computation assosciated with it ( always EOS token. )
         "transitions": flat_transition_map,
         "trans_key_to_states": trans_key_to_states,
         "alphabet_anything_value": anything_value,
@@ -219,7 +226,7 @@ def create_fsm_index_tokenizer(
     regex_str: str,
     tokenizer: "Tokenizer",
 ) -> Tuple[Dict[int, Dict[int, int]], Set[int]]:
-    """Construct an FMS index from a tokenizer.
+    """Construct an FSM index from a tokenizer.
 
     This uses the end-to-end approach of `create_fsm_index_end_to_end`.
 
@@ -232,7 +239,8 @@ def create_fsm_index_tokenizer(
     vocabulary, empty_token_ids = reduced_vocabulary(tokenizer)
 
     fsm_info = fsm.fsm_info
-    finals = fsm_info['finals']
+    finals = set(fsm_info['finals'])
+    fsm_info['pattern'] = regex_str
     # rust impl expects generic types, so just cast them.
     lazy_fsm_index = create_fsm_index_end_to_end(fsm_info, dict(vocabulary), tokenizer.eos_token_id)  # type: ignore
     return lazy_fsm_index, empty_token_ids, finals
