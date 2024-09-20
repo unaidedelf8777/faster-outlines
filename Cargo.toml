@@ -1,5 +1,5 @@
 [package]
-name = "faster_outlines"  ## this will be the submodule name
+name = "faster_outlines"  
 version = "0.1.2"
 edition = "2021"
 
