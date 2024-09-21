@@ -61,7 +61,7 @@ from faster_outlines import patch
 import outlines
 patch(outlines)
 
-from outlines_core.fsm.fsm import RegexFSM # Import as usual.
+from outline.fsm.fsm import RegexFSM # Import as usual.
 ```
 
 
