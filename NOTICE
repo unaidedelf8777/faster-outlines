@@ -1,0 +1,15 @@
+faster-outlines
+
+Copyright 2024. All rights reserved.
+
+This product includes software developed at faster-outlines (https://github.com/unaidedelf8777/faster-outlines).
+
+This product includes code inspired by:
+- Outlines (https://github.com/dottxt-ai/outlines), originally developed by dottxt-ai, licensed under the Apache 2.0 license.
+
+This product includes third-party software:
+- interegular (https://github.com/MegaIng/regex_intersections), licensed under MIT.
+- torch (https://pytorch.org/), licensed under BSD-3.
+
+This product is licensed under the Apache License 2.0.
+For full license text, please refer to the LICENSE file included with this distribution.

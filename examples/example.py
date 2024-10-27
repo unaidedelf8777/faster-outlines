@@ -42,12 +42,13 @@ schema = '''{
     }
 }'''
 
-model = outlines.models.transformers("mistralai/Mistral-7B-Instruct-v0.2", device="cuda:0", model_kwargs={"load_in_8bit": True})
+model = outlines.models.transformers("gpt2")
 print("Model loaded.")
+import time
+t = time.perf_counter()
 generator = outlines.generate.json(model, schema)
 character = generator("Give me a character description")
 print(character)
-
 prompt = """You are a sentiment-labelling assistant.
 Is the following review positive or negative?
 
@@ -74,3 +75,4 @@ generator = outlines.generate.regex(
 answer = generator(prompt, max_tokens=30)
 
 print(f"--------\n{prompt}\n\n{answer}\n--------")
+print(time.perf_counter() - t)

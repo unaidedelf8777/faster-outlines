@@ -1,36 +1,30 @@
-[tool.poetry]
+[project]
 name = "faster_outlines"
-packages = [
-    { include = "faster_outlines" },
+version = "2024.21.10"
+description = "Faster, lazy backend for the `Outlines` library"
+authors = [
+{ name = "Nathan Hoos" }
 ]
-version = "07.18.2024"
-description = "Make The `Outlines` Library FASTER!"
-authors = ["Nathan Hoos <thwackyy.y@gmail.com>"]
-license = "Apache 2.0"
+license = { text =  "Apache 2.0"}
 readme = "README.md"
-
-
 classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
-    "Programming Language :: Python :: Implementation :: PyPy",
+]
+dependencies = [
+    "torch",
+    "interegular"
+]
+requires-python = '>=3.10'
+
+[project.optional-dependencies]
+dev = [
+    "setuptools-rust>1.9.0"
 ]
 
-[tool.poetry.dependencies]
-python = "^3.9"
-torch = "^2.2.2"
-numpy = "1.26.4"
-interegular = "0.3.3"
-
-[tool.poetry.group.dev.dependencies]
-ruff = "^0.3.1"
-pre-commit = "^3.7.0"
-setuptools-rust = "^1.9.0"
-
 [build-system]
-requires = ["setuptools>=69.5.1", "wheel", "setuptools-rust>=1.9.0", "tomlkit>=0.12.5"]
+requires = ["setuptools>=69.5.1", "wheel", "setuptools-rust>=1.9.0"]
 build-backend = "setuptools.build_meta"
-
 
 [lib]
 name = "fsm_utils" 

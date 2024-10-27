@@ -18,11 +18,11 @@ Key features:
 - 🏎️ Substantial performance improvements, especially for complex regex patterns ( like JSON )
 - 🔄 Continuous updates to improve speed!
 
-Upcoming:
+Upcoming (in no particular order):
 - 🍴 vLLM fork using faster_outlines
 - 🤝 Official integration with vLLM's main repo (hopefully)
-- Better FSM Caching
 - Redis as a caching backend, for large inference setups
+- 🦀 Rust API. ( currently started, but unfinished )
 
 ## Why faster_outlines?
 
@@ -53,6 +53,16 @@ patch(outlines)
 
 # Now use outlines as you normally would
 # Your code here...
+```
+
+You can also pass ```save_to_sys_modules=True``` to the patch function, in which case all normal outlines imports will use the modified / patched module.
+
+```python
+from faster_outlines import patch
+import outlines
+patch(outlines)
+
+from outline.fsm.fsm import RegexFSM # Import as usual.
 ```
 
 
@@ -115,14 +125,6 @@ print(character)
 ![Performance Graph](https://raw.githubusercontent.com/unaidedelf8777/faster-outlines/main/assets/benchmark.png)
 <figcaption style="text-align: center;">Latest as of 7.13.2024 (0.0.46)</figcaption>
 
-The graph above illustrates the performance advantage of faster_outlines over the standard Outlines library. As the complexity of regex patterns increases (measured by the number of FSM states), faster_outlines maintains significantly lower processing times.
-
-For even faster compilation times on machines with more powerful CPUs ( such as inference servers ), the number of threads is automatically scaled according to the number of available threads. scaling rules are as follows: 
-
-- 1-4 CPU threads: Uses 1 thread
-- 5-8 CPU threads: Uses 2 threads
-- 9+ CPU threads: Uses ~1/4 of available threads (min 2, max 16)
-
 However, if you would like to manually control the number of threads used, you can do so via environment variable:
 
 ```bash
@@ -146,7 +148,7 @@ We welcome contributions!
 If you would like to support the further development and more speed improvements for faster_outlines, please consider supporting us on Github sponsors, or make a donation using the *Buy-Me-A-Coffee* link below!
 
 <div align="center" style="margin-top: 2em; margin-bottom: 1em;">
-<a href="https://www.buymeacoffee.com/unaidedelf8777"><img src="https://img.buymeacoffee.com/button-api/?text=Buy me a pizza&emoji=🍕&slug=unaidedelf8777&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" /></a>
+<a href="https://www.buymeacoffee.com/unaidedelf8777"><img src="https://img.buymeacoffee.com/button-api/?text=Buy me a pizza&emoji=🍕&slug=unaidedelf8777&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff"/></a>
 </div>
 
 # Issues 

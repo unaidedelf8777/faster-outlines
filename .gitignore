@@ -6,8 +6,9 @@ __pycache__/
 # C extensions
 *.so
 
-# Rust builds and crap
-function_sampler/fsm/lib/target
+# Lock files
+.lock
+
 wheelhouse/
 # Distribution / packaging
 .Python
