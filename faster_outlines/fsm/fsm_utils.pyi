@@ -141,13 +141,13 @@ def create_fsm_index_end_to_end_rs(
     """
     ...
 
-def start_cache_reciever() -> None:
+def start_cache_receiver() -> None:
     """
     Starts the cache receiver thread.
     """
     ...
 
-def stop_cache_reciever() -> None:
+def stop_cache_receiver() -> None:
     """
     Stops the cache receiver thread.
     """

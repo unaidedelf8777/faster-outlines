@@ -4,8 +4,8 @@ from .regex import (
 )
 
 from .fsm_utils import (
-    start_cache_reciever,
-    stop_cache_reciever,
+    start_cache_receiver,
+    stop_cache_receiver,
     Write,
     Generate,
     TokenVocabulary
@@ -14,6 +14,7 @@ from .fsm_utils import (
 from .guide import (
     RegexGuide, 
     LazyVLLMRegexGuide,
+    VLLMRegexGuide,
     Write,
     Generate
 )
@@ -25,5 +26,6 @@ __all__ = [
     "Generate", 
     "Write", 
     "RegexGuide", 
-    "LazyVLLMRegexGuide"
+    "LazyVLLMRegexGuide",
+    "VLLMRegexGuide"
 ] 

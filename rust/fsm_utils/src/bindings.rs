@@ -185,12 +185,12 @@ pub(crate) fn create_fsm_index_end_to_end_(
 }
 
 #[pyfunction]
-pub(crate) fn start_cache_reciever() -> PyResult<()> {
+pub(crate) fn start_cache_receiver() -> PyResult<()> {
     start_zmq_thread().map_err(|e| PyOSError::new_err(format!("Failed to start cache receiver: {:?}", e)))
 }
 
 #[pyfunction]
-pub(crate) fn stop_cache_reciever() -> PyResult<()> {
+pub(crate) fn stop_cache_receiver() -> PyResult<()> {
     stop_zmq_thread().map_err(|e| PyOSError::new_err(format!("Failed to stop cache receiver: {:?}", e)))
 }
 
@@ -198,8 +198,8 @@ pub(crate) fn stop_cache_reciever() -> PyResult<()> {
 pub fn fsm_utils(m: &Bound<'_, PyModule>) -> PyResult<()> {
     Lazy::force(&MODULE_STATE);
     m.add_function(wrap_pyfunction!(create_fsm_index_end_to_end_, m)?)?;
-    m.add_function(wrap_pyfunction!(start_cache_reciever, m)?)?;
-    m.add_function(wrap_pyfunction!(stop_cache_reciever, m)?)?;
+    m.add_function(wrap_pyfunction!(start_cache_receiver, m)?)?;
+    m.add_function(wrap_pyfunction!(stop_cache_receiver, m)?)?;
     m.add_function(wrap_pyfunction!(get_cached_fsm_py, m)?)?;
     m.add_function(wrap_pyfunction!(get_fsm_cache_key_py, m)?)?;
     m.add_class::<LazyFSMIndex>()?;
