@@ -12,25 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use rustc_hash::FxHashMap;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenVocabulary {
     pub tokens: Vec<(String, Vec<u32>)>,
-    pub eos_token_id: u32
+    pub eos_token_id: u32,
 }
 
 impl TokenVocabulary {
-
     pub fn default() -> Self {
         Self {
             tokens: Vec::new(),
-            eos_token_id: 0
+            eos_token_id: 0,
         }
     }
     pub fn from_hashmap(vocab_map: FxHashMap<String, Vec<u32>>, eos_token_id: u32) -> Self {
         let tokens: Vec<(String, Vec<u32>)> = vocab_map.into_iter().collect();
-        TokenVocabulary { tokens, eos_token_id }
+        TokenVocabulary {
+            tokens,
+            eos_token_id,
+        }
     }
 
     pub fn add_token(&mut self, token: String, values: Vec<u32>) {
@@ -62,7 +64,7 @@ impl<'a> IntoIterator for &'a TokenVocabulary {
     type Item = (&'a String, &'a Vec<u32>);
     type IntoIter = std::iter::Map<
         std::slice::Iter<'a, (String, Vec<u32>)>,
-        fn(&'a (String, Vec<u32>)) -> (&'a String, &'a Vec<u32>)
+        fn(&'a (String, Vec<u32>)) -> (&'a String, &'a Vec<u32>),
     >;
 
     fn into_iter(self) -> Self::IntoIter {

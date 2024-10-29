@@ -1,7 +1,7 @@
 // This is basically identical to https://docs.rs/atomic-wait/latest/atomic_wait/
 // just modified so that it works with AtomicBool instead of AtomicU32
 #![allow(dead_code)]
-#[cfg( target_os = "linux" )]
+#[cfg(target_os = "linux")]
 pub mod platform {
     use core::sync::atomic::AtomicBool;
     use libc;
@@ -45,10 +45,10 @@ pub mod platform {
     }
 }
 
-#[cfg( target_os = "freebsd")]
+#[cfg(target_os = "freebsd")]
 pub mod platform {
-    use libc;
     use core::sync::atomic::AtomicBool;
+    use libc;
 
     #[inline]
     pub fn wait(a: &AtomicBool, expected: bool) {

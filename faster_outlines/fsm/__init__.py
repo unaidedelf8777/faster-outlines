@@ -4,8 +4,6 @@ from .regex import (
 )
 
 from .fsm_utils import (
-    start_cache_receiver,
-    stop_cache_receiver,
     Write,
     Generate,
     TokenVocabulary

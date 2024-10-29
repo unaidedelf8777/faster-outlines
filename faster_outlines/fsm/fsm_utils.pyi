@@ -131,25 +131,12 @@ class TokenVocabulary:
 
 def create_fsm_index_end_to_end_rs(
     fsm_info: Dict[str, Any],
-    vocabulary: TokenVocabulary,
-    eos_token_id: int
+    vocabulary: TokenVocabulary
 ) -> 'LazyFSMIndex':
     """
     create_fsm_index_end_to_end_rs(fsm_info, vocabulary, eos_token_id) -> LazyFSMIndex
 
     Creates a LazyFSMIndex instance using the provided FSMInfo, TokenVocabulary, and eos_token_id.
-    """
-    ...
-
-def start_cache_receiver() -> None:
-    """
-    Starts the cache receiver thread.
-    """
-    ...
-
-def stop_cache_receiver() -> None:
-    """
-    Stops the cache receiver thread.
     """
     ...
 

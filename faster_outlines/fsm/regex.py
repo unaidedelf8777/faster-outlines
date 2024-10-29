@@ -14,7 +14,8 @@ from interegular import parse_pattern
 from functools import lru_cache
 from .fsm_utils import (
     create_fsm_index_end_to_end_rs,
-    TokenVocabulary
+    TokenVocabulary,
+    FSMInfo
 )
 from .utils import reduced_vocabulary
 from transformers import PreTrainedTokenizerBase
@@ -58,19 +59,19 @@ class BetterFSM(FSM):
     def fsm_info(self):
         if self.__dict__['_fsm_info'] is None:
             anything_value = self.alphabet.anything_value
-            self.__dict__["_fsm_info"] = {
-                "initial": self.initial,
-                "finals": list(self.finals),
-                "states": list(sorted(self.map.keys())),
-                "transitions": self.flat_transition_map,
-                "alphabet_anything_value": anything_value,
-                "alphabet_symbol_mapping": {
+            self.__dict__["_fsm_info"] = FSMInfo(
+                initial=self.initial,
+                finals=list(self.finals),
+                states=list(sorted(self.map.keys())),
+                transitions=self.flat_transition_map,
+                alphabet_anything_value=anything_value,
+                alphabet_symbol_mapping={
                     k: v
                     for k, v in self.alphabet._symbol_mapping.items()
                     if k != anything_else
                 },
-                "pattern": self.pattern
-            }
+                pattern=self.pattern
+            )
 
         return self.__dict__['_fsm_info']
 
@@ -115,9 +116,9 @@ def create_fsm_index_end_to_end(
     """
     fsm = build_regex(regex_str)
     fsm_info = fsm.fsm_info
-    finals = set(fsm_info['finals'])
+    finals = set(fsm_info.finals)
     lazy_fsm_index = create_fsm_index_end_to_end_rs(fsm_info, vocabulary)
-    return lazy_fsm_index, finals, fsm_info['states']
+    return lazy_fsm_index, finals, fsm_info.states
     
 def create_fsm_index_tokenizer(
     fsm: BetterFSM,

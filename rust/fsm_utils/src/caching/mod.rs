@@ -14,9 +14,5 @@
 
 mod caching;
 mod hashing;
-#[cfg(feature = "python_bindings")]
-mod zmq_service;
 pub use caching::*;
 pub use hashing::*;
-#[cfg(feature = "python_bindings")]
-pub use zmq_service::*;

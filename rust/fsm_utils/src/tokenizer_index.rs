@@ -11,23 +11,14 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::sync::Arc;
-use std::sync::atomic::Ordering;
-use rustc_hash::{
-    FxHashMap, 
-    FxHashSet
-};
 use crate::{
-    types::{
-        FSMInfo, 
-        StateNotifierMap, 
-        StatesToTokenMaps
-    },
-    atomic_wait::platform::{
-        wake_all
-    },
-    vocab::TokenVocabulary
+    atomic_wait::platform::wake_all,
+    types::{FSMInfo, StateNotifierMap, StatesToTokenMaps},
+    vocab::TokenVocabulary,
 };
+use rustc_hash::{FxHashMap, FxHashSet};
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 #[inline(always)]
 fn create_vocab_transition_vector(
@@ -85,7 +76,6 @@ fn walk_fsm(
     accepted_states
 }
 
-
 fn state_scan_tokens(
     fsm_info: &FSMInfo,
     vocabulary: &[Vec<u32>],
@@ -94,16 +84,9 @@ fn state_scan_tokens(
 ) -> FxHashSet<(u32, u32)> {
     vocabulary
         .iter()
-        .zip(
-            vocabulary_transition_keys.iter()
-        )
+        .zip(vocabulary_transition_keys.iter())
         .flat_map(|(token_ids, token_transition_keys)| {
-            let state_seq = walk_fsm(
-                fsm_info,
-                token_transition_keys,
-                start_state,
-                false,
-            );
+            let state_seq = walk_fsm(fsm_info, token_transition_keys, start_state, false);
             let last_state_opt = if state_seq.len() < token_transition_keys.len() {
                 None
             } else {

@@ -1,4 +1,4 @@
-from functools import lru_cache
+
 
 SPIECE_UNDERLINE = "\u2581"
 
@@ -9,7 +9,7 @@ def convert_token_to_string(token: str) -> str:
 
     return token
 
-@lru_cache
+
 def reduced_vocabulary(tokenizer, _convert_token_to_string=convert_token_to_string):
     """Create a map from decoded vocabulary tokens to lists of equivalent token ids."""
     vocabulary = {}

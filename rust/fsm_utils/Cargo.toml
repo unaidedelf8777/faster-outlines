@@ -16,7 +16,6 @@ libc = "0.2.161"
 
 serde = { version = "1.0.210", features = ["derive"], optional = true }
 serde_json = { version = "1.0.128", features = ["preserve_order"], optional = true }
-zmq = { version = "0.10.0", optional = true }
 pyo3 = { version = "0.22.0", features = ["extension-module", "anyhow"], optional = true }
 
 [profile.release]
@@ -29,4 +28,4 @@ panic = 'abort'
 [features]
 default = []
 e2e_experimental = []
-python_bindings = ["pyo3", "serde", "serde_json", "zmq"]
+python_bindings = ["pyo3", "serde", "serde_json"]

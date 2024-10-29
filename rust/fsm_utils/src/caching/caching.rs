@@ -12,29 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::environment::{FSM_CACHE_SIZE, DISABLE_CACHE};
-use serde::{Serialize, Deserialize};
-use std::sync::{Arc, Mutex};
+use crate::environment::{DISABLE_CACHE, FSM_CACHE_SIZE};
+use lru::LruCache;
 use once_cell::sync::Lazy;
 use rustc_hash::FxHashMap;
-use lru::LruCache;
+use serde::{Deserialize, Serialize};
+use std::sync::{Arc, Mutex};
 
 #[derive(Serialize, Deserialize, Clone)]
 pub(crate) struct CachedFSM {
-    pub states_to_token_maps: Vec<FxHashMap<u32,u32>>,
+    pub states_to_token_maps: Vec<FxHashMap<u32, u32>>,
     pub first_state: u32,
     pub finals: Vec<u32>,
-    pub hash: u64
+    pub hash: u64,
 }
 
 pub(crate) struct ModuleState {
     pub fsm_cache: Mutex<LruCache<u64, Arc<CachedFSM>>>,
 }
 
-pub(crate) static MODULE_STATE: Lazy<ModuleState> = Lazy::new(|| {
-    ModuleState {
-        fsm_cache: Mutex::new(LruCache::new(std::num::NonZeroUsize::new(*FSM_CACHE_SIZE).unwrap())),
-    }
+pub(crate) static MODULE_STATE: Lazy<ModuleState> = Lazy::new(|| ModuleState {
+    fsm_cache: Mutex::new(LruCache::new(
+        std::num::NonZeroUsize::new(*FSM_CACHE_SIZE).unwrap(),
+    )),
 });
 
 pub fn get_cached_fsm(hash: u64) -> Option<Arc<CachedFSM>> {

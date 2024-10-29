@@ -21,8 +21,8 @@ pub static FSM_CACHE_SIZE: Lazy<usize> = Lazy::new(|| {
         .unwrap_or(100)
 });
 
-pub static DISABLE_CACHE: Lazy<bool> = Lazy::new(|| {
-    match env::var("FASTER_OUTLINES_DISABLE_CACHE") {
+pub static DISABLE_CACHE: Lazy<bool> =
+    Lazy::new(|| match env::var("FASTER_OUTLINES_DISABLE_CACHE") {
         Ok(val) => {
             let val_lower = val.to_lowercase();
             let is_disabled = val_lower == "1" || val_lower == "true" || val_lower == "yes";
@@ -30,7 +30,6 @@ pub static DISABLE_CACHE: Lazy<bool> = Lazy::new(|| {
                 println!("Cache is disabled via DISABLE_CACHE environment variable.");
             }
             is_disabled
-        },
-        Err(_) => false, 
-    }
-});
+        }
+        Err(_) => false,
+    });

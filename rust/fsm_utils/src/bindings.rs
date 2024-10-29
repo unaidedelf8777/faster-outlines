@@ -15,11 +15,13 @@
 use serde::{Serialize, Deserialize};
 use once_cell::sync::Lazy;
 use rustc_hash::FxHashMap;
+use anyhow::{Result, Context};
+
 use pyo3::{
     wrap_pyfunction,
     prelude::*,
     exceptions::{
-        PyOSError,
+        PyRuntimeError,
         PyValueError,
     },
     types::{
@@ -29,66 +31,22 @@ use pyo3::{
 };
 use crate::{
     lazy_index::{
-        LazyFSMIndex,
-        Write,
-        Generate
-    },
-    types::{
-        FSMInfo,
+        LazyFSMIndex
     },
     caching::{
         MODULE_STATE,
         get_cached_fsm,
         get_fsm_cache_key,
-        CachedFSM,
-        start_zmq_thread,
-        stop_zmq_thread
+        CachedFSM
+    },
+    types::{
+        Write,
+        Generate,
+        Instruction,
+        FSMInfo
     },
     vocab::TokenVocabulary,
 };
-
-impl IntoPy<PyObject> for CachedFSM {
-    fn into_py(self, py: Python<'_>) -> PyObject {
-        let dict = PyDict::new_bound(py);
-
-        let maps_vec: Vec<PyObject> = self.states_to_token_maps
-            .into_iter()
-            .map(|map| {
-                let py_map = PyDict::new_bound(py);
-                for (k, v) in map {
-                    let _ = py_map.set_item(k, v);
-                }
-                py_map.into()
-            })
-            .collect();
-        let maps = PyList::new_bound(py, &maps_vec);
-
-        let _ = dict.set_item("states_to_token_maps", maps);
-        let _ = dict.set_item("first_state", self.first_state);
-        let _ = dict.set_item("finals", &self.finals);
-        let _ = dict.set_item("hash", self.hash);
-
-        dict.into()
-    }
-}
-
-#[pyfunction(name = "get_cached_fsm")]
-pub(crate) fn get_cached_fsm_py(py: Python, hash: u64) -> PyResult<PyObject> {
-    match get_cached_fsm(hash) {
-        Some(cached_fsm_arc) => {
-            let cached_fsm = std::sync::Arc::try_unwrap(cached_fsm_arc)
-                .unwrap_or_else(|arc| (*arc).clone());
-            Ok(cached_fsm.into_py(py)) 
-        }
-        None => {
-            Err(PyValueError::new_err("CachedFSM not found for the given hash"))
-        }
-    }
-}
-#[pyfunction(name = "get_fsm_cache_key")]
-pub(crate) fn get_fsm_cache_key_py(py: Python, pattern: String, vocab: Py<PyTokenVocabulary>) -> u64 {
-    get_fsm_cache_key(&pattern, &vocab.borrow(py).vocab_as_ref())
-}
 
 #[derive(Serialize, Deserialize)]
 #[pyclass(
@@ -172,39 +130,287 @@ impl PyTokenVocabulary {
     }
 }
 
+#[pyclass(name = "Write")]
+pub struct PyWrite {
+    #[pyo3(get, set)]
+    pub tokens: Vec<i32>,
+}
+
+#[pymethods]
+impl PyWrite {
+    #[new]
+    pub fn new(tokens: Vec<i32>) -> Self {
+        PyWrite { tokens }
+    }
+
+    pub fn __repr__(&self) -> PyResult<String> {
+        Ok(format!("Write({:?})", self.tokens))
+    }
+}
+
+impl From<Write> for PyWrite {
+    fn from(write: Write) -> Self {
+        PyWrite { tokens: write.tokens }
+    }
+}
+
+#[pyclass(name = "Generate")]
+pub struct PyGenerate {
+    #[pyo3(get, set)]
+    pub tokens: Option<Vec<i32>>,
+}
+
+#[pymethods]
+impl PyGenerate {
+    #[new]
+    #[pyo3(signature = (tokens=None))]
+    pub fn new(tokens: Option<Vec<i32>>) -> Self {
+        PyGenerate { tokens }
+    }
+
+    pub fn __repr__(&self) -> PyResult<String> {
+        Ok(format!("Generate({:?})", self.tokens))
+    }
+}
+
+impl From<Generate> for PyGenerate {
+    fn from(generate: Generate) -> Self {
+        PyGenerate { tokens: generate.tokens }
+    }
+}
+
+impl IntoPy<PyObject> for Instruction {
+    fn into_py(self, py: Python) -> PyObject {
+        match self {
+            Instruction::Write(write) => {
+                let py_write: PyWrite = write.into();
+                py_write.into_py(py)
+            }
+            Instruction::Generate(generate) => {
+                let py_generate: PyGenerate = generate.into();
+                py_generate.into_py(py)
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+#[pyclass(
+    name = "FSMInfo"
+)]
+pub struct PyFSMInfo(FSMInfo);
+
+#[pymethods]
+impl PyFSMInfo {
+    #[new]
+    pub fn new(
+        initial: u32,
+        finals: Vec<u32>,
+        transitions: FxHashMap<(u32,u32), u32>,
+        alphabet_symbol_mapping: FxHashMap<String, u32>,
+        alphabet_anything_value: u32,
+        states: Vec<u32>,
+        pattern: String
+    ) -> Self {
+        PyFSMInfo(FSMInfo {
+            initial: initial,
+            finals: finals,
+            transitions: transitions,
+            alphabet_symbol_mapping: alphabet_symbol_mapping,
+            alphabet_anything_value: alphabet_anything_value,
+            states: states,
+            pattern: pattern,
+        })
+    }
+
+    #[getter]
+    pub fn initial(&self) -> u32 {
+        self.0.initial
+    }
+
+    #[getter]
+    pub fn finals(&self) -> Vec<u32> {
+        self.0.finals.clone() // Clone to avoid borrowing issues
+    }
+
+    #[getter]
+    pub fn transitions(&self) -> FxHashMap<(u32, u32), u32> {
+        self.0.transitions.clone()
+    }
+
+    #[getter]
+    pub fn alphabet_symbol_mapping(&self) -> FxHashMap<String, u32> {
+        self.0.alphabet_symbol_mapping.clone()
+    }
+
+    #[getter]
+    pub fn alphabet_anything_value(&self) -> u32 {
+        self.0.alphabet_anything_value
+    }
+
+    #[getter]
+    pub fn states(&self) -> Vec<u32> {
+        self.0.states.clone()
+    }
+
+    #[getter]
+    pub fn pattern(&self) -> String {
+        self.0.pattern.clone()
+    }
+}
+
+impl From<PyFSMInfo> for FSMInfo {
+    fn from(pyfsm: PyFSMInfo) -> FSMInfo {
+        pyfsm.0
+    }
+}
+
+
+
+#[pyclass(name = "LazyFSMIndex")]
+#[derive(Clone)]
+pub struct PyLazyFSMIndex {
+    inner: LazyFSMIndex
+}
+
+impl PyLazyFSMIndex {
+    pub fn new(
+        fsm_info: FSMInfo,
+        vocabulary: &TokenVocabulary
+    ) -> Result<Self> {
+        Ok(PyLazyFSMIndex {
+            inner: LazyFSMIndex::new(
+                fsm_info,
+                vocabulary, 
+                vocabulary.eos_token_id
+            )
+        })
+    }
+}
+
+#[pymethods]
+impl PyLazyFSMIndex {
+    
+
+    pub fn get_next_state(&self, state: i32, token_id: u32) -> Option<i32> {
+        self.inner.get_next_state(state, token_id)
+    }
+
+    pub fn get_next_instruction(&self, state: i32) -> PyResult<PyObject> {
+        Python::with_gil(|py| {
+            let instruction = self.inner.get_next_instruction(state);
+            match instruction {
+                Instruction::Write(write) => {
+                    let py_write: PyWrite = write.into();
+                    Ok(py_write.into_py(py))
+                },
+                Instruction::Generate(generate) => {
+                    let py_generate: PyGenerate = generate.into();
+                    Ok(py_generate.into_py(py))
+                }
+            }
+        })
+    }
+
+    pub fn collect_finished_states(&self) -> PyResult<FxHashMap<u32, FxHashMap<u32, u32>>> {
+        self.inner.collect_finished_states()
+            .map_err(|e| PyValueError::new_err(e.to_string()))
+    }
+
+    pub fn await_state(&self, state_index: u32) -> PyResult<()> {
+        self.inner.await_state(state_index)
+            .map_err(|e| PyValueError::new_err(e.to_string()))
+    }
+
+    pub fn await_finished(&self) {
+        self.inner.await_finished()
+    }
+
+    pub fn get_allowed_token_ids(&self, state: i32) -> Vec<i32> {
+        self.inner.get_allowed_token_ids(state)
+    }
+
+    pub fn __repr__(&self) -> String {
+        self.inner.__repr__()
+    }
+}
+
+impl IntoPy<PyObject> for CachedFSM {
+    fn into_py(self, py: Python<'_>) -> PyObject {
+        let dict = PyDict::new_bound(py);
+
+        let maps_vec: Vec<PyObject> = self.states_to_token_maps
+            .into_iter()
+            .map(|map| {
+                let py_map = PyDict::new_bound(py);
+                for (k, v) in map {
+                    let _ = py_map.set_item(k, v);
+                }
+                py_map.into()
+            })
+            .collect();
+        let maps = PyList::new_bound(py, &maps_vec);
+
+        let _ = dict.set_item("states_to_token_maps", maps);
+        let _ = dict.set_item("first_state", self.first_state);
+        let _ = dict.set_item("finals", &self.finals);
+        let _ = dict.set_item("hash", self.hash);
+
+        dict.into()
+    }
+}
+
+#[pyfunction(name = "get_cached_fsm")]
+pub(crate) fn get_cached_fsm_py(py: Python, hash: u64) -> PyResult<PyObject> {
+    match get_cached_fsm(hash) {
+        Some(cached_fsm_arc) => {
+            let cached_fsm = std::sync::Arc::try_unwrap(cached_fsm_arc)
+                .unwrap_or_else(|arc| (*arc).clone());
+            Ok(cached_fsm.into_py(py)) 
+        }
+        None => {
+            Err(PyValueError::new_err("CachedFSM not found for the given hash"))
+        }
+    }
+}
+#[pyfunction(name = "get_fsm_cache_key")]
+pub(crate) fn get_fsm_cache_key_py(py: Python, pattern: String, vocab: Py<PyTokenVocabulary>) -> u64 {
+    get_fsm_cache_key(&pattern, &vocab.borrow(py).vocab_as_ref())
+}
+
+
 #[pyfunction(name = "create_fsm_index_end_to_end_rs")]
 #[pyo3(text_signature = "(fsm_info, vocabulary, eos_token_id)")]
-pub(crate) fn create_fsm_index_end_to_end_(
-    py: Python,
-    fsm_info: FSMInfo,
+pub(crate) fn create_fsm_index_end_to_end_<'py>(
+    py: Python<'py>,
+    fsm_info: PyFSMInfo,
     vocabulary: Py<PyTokenVocabulary>,
-) -> LazyFSMIndex {
-    let binding = vocabulary.borrow(py);
-    let v = binding.vocab_as_ref();
-    LazyFSMIndex::new(fsm_info, v, v.eos_token_id)
-}
+) -> PyResult<PyLazyFSMIndex> {
+    let f: FSMInfo = fsm_info.into();
+    let v = vocabulary.borrow(py);
+    let v = v.vocab_as_ref();
+    let result: Result<PyLazyFSMIndex> = (|| {
+        
+        PyLazyFSMIndex::new(f, v)
+            .context("Failed to create FSM index")
+    })();
 
-#[pyfunction]
-pub(crate) fn start_cache_receiver() -> PyResult<()> {
-    start_zmq_thread().map_err(|e| PyOSError::new_err(format!("Failed to start cache receiver: {:?}", e)))
-}
-
-#[pyfunction]
-pub(crate) fn stop_cache_receiver() -> PyResult<()> {
-    stop_zmq_thread().map_err(|e| PyOSError::new_err(format!("Failed to stop cache receiver: {:?}", e)))
+    result.map_err(|e| {
+        PyRuntimeError::new_err(format!("FSM index creation failed: {:#}", e))
+    })
 }
 
 #[pymodule]
 pub fn fsm_utils(m: &Bound<'_, PyModule>) -> PyResult<()> {
     Lazy::force(&MODULE_STATE);
     m.add_function(wrap_pyfunction!(create_fsm_index_end_to_end_, m)?)?;
-    m.add_function(wrap_pyfunction!(start_cache_receiver, m)?)?;
-    m.add_function(wrap_pyfunction!(stop_cache_receiver, m)?)?;
     m.add_function(wrap_pyfunction!(get_cached_fsm_py, m)?)?;
     m.add_function(wrap_pyfunction!(get_fsm_cache_key_py, m)?)?;
-    m.add_class::<LazyFSMIndex>()?;
+
+    m.add_class::<PyFSMInfo>()?;
+    m.add_class::<PyLazyFSMIndex>()?;
     m.add_class::<PyTokenVocabulary>()?;
-    m.add_class::<Write>()?;
-    m.add_class::<Generate>()?;
+    m.add_class::<PyWrite>()?;
+    m.add_class::<PyGenerate>()?;
     Ok(())
 }

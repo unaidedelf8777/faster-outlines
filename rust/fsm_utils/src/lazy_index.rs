@@ -11,119 +11,22 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::sync::atomic::{AtomicBool, Ordering};
+use crate::types::{StateNotifierMap, StatesToTokenMaps};
+use crate::{
+    atomic_wait::platform::wait,
+    caching::{get_cached_fsm, get_fsm_cache_key, insert_fsm_to_cache, CachedFSM},
+    tokenizer_index::create_fsm_index_end_to_end,
+    types::{FSMInfo, Generate, Instruction, ThreadSafeCell, Write},
+    vocab::TokenVocabulary,
+};
+use anyhow::Result;
 use rustc_hash::FxHashMap;
 use std::cell::Cell;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
-use std::sync::{
-    Arc,
-    Mutex
-};
-use anyhow::{
-    bail,
-    Result
-};
-use crate::types::{
-    StateNotifierMap,
-    StatesToTokenMaps
-};
-use crate::{
-    caching::{
-        get_fsm_cache_key,
-        get_cached_fsm,
-        insert_fsm_to_cache,
-        CachedFSM,
-        check_zmq_service_running 
-    },
-    types::{
-        FSMInfo, 
-        ThreadSafeCell, 
-    },
-    vocab::TokenVocabulary,
-    tokenizer_index::create_fsm_index_end_to_end,
-    atomic_wait::platform::{
-        wait
-    }
-};
-#[cfg(feature = "python_bindings")]
-use pyo3::prelude::*;
 
-/// Write instruction.
-///
-/// Attributes
-/// ---------
-///  - tokens
-///     The sequence of tokens to be added to the current sequence by the
-///     generation process.
-///
-#[pyclass]
 #[derive(Clone)]
-pub struct Write {
-    #[pyo3(get, set)]
-    pub tokens: Vec<i32>,
-}
-
-#[pymethods]
-impl Write {
-    #[new]
-    pub fn new(tokens: Vec<i32>) -> Self {
-        Write { tokens }
-    }
-
-    pub fn __repr__(&self) -> PyResult<String> {
-        Ok(format!("Write({:?})", self.tokens))
-    }
-}
-
-/// Generate instruction
-///
-/// Attributes
-/// ----------
-/// - tokens
-///     The tokens that lead to a valid completion if generated.  A value
-///     of ``None`` indicates that all tokens are allowed.
-///
-#[pyclass]
-#[derive(Clone)]
-pub struct Generate {
-    #[pyo3(get, set)]
-    pub tokens: Option<Vec<i32>>,
-}
-
-#[pymethods]
-impl Generate {
-    #[new]
-    pub fn new(tokens: Option<Vec<i32>>) -> Self {
-        Generate { tokens }
-    }
-
-    pub fn __repr__(&self) -> PyResult<String> {
-        Ok(format!("Generate({:?})", self.tokens))
-    }
-}
-
-pub enum Instruction {
-    Write { write: Write },
-    Generate { generate: Generate },
-}
-
-impl IntoPy<PyObject> for Instruction {
-    fn into_py(self, py: Python) -> PyObject {
-        match self {
-            Instruction::Write { write } => {
-                let py_write = Py::new(py, write).unwrap();
-                py_write.to_object(py)
-            }
-            Instruction::Generate { generate } => {
-                let py_gen = Py::new(py, generate).unwrap();
-                py_gen.to_object(py)
-            }
-        }
-    }
-}
-
-
-#[cfg_attr(feature = "python_bindings", pyclass)]
 pub struct LazyFSMIndex {
     /// The mapping of states to token subsets from the tokenizer.
     states_to_token_maps: StatesToTokenMaps,
@@ -144,18 +47,14 @@ pub struct LazyFSMIndex {
     /// over the notifiers to check if they are all finished.
     computing_finished: Arc<Mutex<bool>>,
 
-
-    max_returned_state: Cell<Option<usize>>
+    // state for async interface
+    max_returned_state: Cell<Option<usize>>,
 }
 
 // This impl block holds all methods which are not feature specific,
 // Other impl blocks are specific to where the object is being used from ( i.e. python, rust )
 impl LazyFSMIndex {
-    pub fn new(
-        fsm_info: FSMInfo,
-        vocabulary: &TokenVocabulary, 
-        eos_token_id: u32
-    ) -> Self {
+    pub fn new(fsm_info: FSMInfo, vocabulary: &TokenVocabulary, eos_token_id: u32) -> Self {
         let vocabulary = vocabulary.clone();
         let cache_key = get_fsm_cache_key(&fsm_info.pattern, &vocabulary);
 
@@ -164,11 +63,11 @@ impl LazyFSMIndex {
         match cache_entry {
             Some(cached_fsm) => {
                 let states_to_token_maps: Arc<Vec<ThreadSafeCell<FxHashMap<u32, u32>>>> = Arc::new(
-                cached_fsm
-                    .states_to_token_maps
-                    .iter()
-                    .map(|map| ThreadSafeCell::new(map.clone()))
-                    .collect(),
+                    cached_fsm
+                        .states_to_token_maps
+                        .iter()
+                        .map(|map| ThreadSafeCell::new(map.clone()))
+                        .collect(),
                 );
 
                 let state_notifiers: StateNotifierMap = Arc::new(
@@ -184,18 +83,18 @@ impl LazyFSMIndex {
                     finals: cached_fsm.finals.clone(),
                     computing_finished: Arc::new(Mutex::new(true)),
                     state_notifiers: state_notifiers,
-                    max_returned_state: Cell::new(None)
+                    max_returned_state: Cell::new(None),
                 };
 
                 return fsm_index;
             }
             None => {
-                let results: Arc<Vec<ThreadSafeCell<FxHashMap<u32,u32>>>> = Arc::new(
+                let results: Arc<Vec<ThreadSafeCell<FxHashMap<u32, u32>>>> = Arc::new(
                     (0..fsm_info.states.len())
                         .map(|_| ThreadSafeCell::new(FxHashMap::default()))
                         .collect::<Vec<_>>(),
                 );
-                
+
                 let state_notifiers: StateNotifierMap = Arc::new(
                     (0..fsm_info.states.len())
                         .map(|_| Arc::new(AtomicBool::new(false)))
@@ -226,31 +125,11 @@ impl LazyFSMIndex {
                             .collect(),
                         first_state,
                         finals: finals_clone.to_vec(),
-                        hash: cache_key_clone.clone()
+                        hash: cache_key_clone.clone(),
                     };
-                    
+
                     *computing_finished_clone.lock().unwrap() = true;
-
-                    let sent_to_service = (|| -> Result<bool, anyhow::Error> {
-                        let (running, address) = check_zmq_service_running()?;
-                        if !running {
-                            return Ok(false);
-                        }
-                        let context = zmq::Context::new();
-                        let socket = context.socket(zmq::SocketType::REQ)?;
-                        socket.connect(&address)?;
-                    
-                        let serialized_fsm = serde_json::to_vec(&cached_fsm)?;
-                        socket.send(&serialized_fsm, 0)?;
-                    
-                        Ok(true)
-                    })().unwrap_or(false);
-                    
-
-                    if !sent_to_service {
-                        insert_fsm_to_cache(cached_fsm, cache_key_clone);
-                    }
-                    
+                    insert_fsm_to_cache(cached_fsm, cache_key_clone);
                 });
                 let finals = finals.to_vec();
                 LazyFSMIndex {
@@ -260,7 +139,7 @@ impl LazyFSMIndex {
                     finals: finals,
                     computing_finished: computing_finished,
                     state_notifiers: state_notifiers,
-                    max_returned_state: Cell::new(None)
+                    max_returned_state: Cell::new(None),
                 }
             }
         }
@@ -294,13 +173,10 @@ impl LazyFSMIndex {
     fn is_computing_finished(&self) -> bool {
         *self.computing_finished.lock().unwrap()
     }
-
 }
 
 // All public methods.
-#[cfg_attr(feature = "python_bindings", pymethods)]
 impl LazyFSMIndex {
-
     pub fn get_next_state(&self, state: i32, token_id: u32) -> Option<i32> {
         // Handle special states (-1 is final state, 0 is the first state alias)
         if state == -1 {
@@ -335,9 +211,7 @@ impl LazyFSMIndex {
 
     pub fn get_next_instruction(&self, state: i32) -> Instruction {
         if self.is_final_state(state) {
-            return Instruction::Write {
-                write: Write::new(vec![self.eos_token_id as i32]),
-            };
+            return Instruction::Write(Write::new(vec![self.eos_token_id as i32]));
         }
 
         let current_state = if state == 0 {
@@ -348,26 +222,22 @@ impl LazyFSMIndex {
 
         if let Some(map) = self.get_state_map(current_state) {
             let allowed = map.keys().cloned().map(|k| k as i32).collect::<Vec<i32>>();
-            Instruction::Generate {
-                generate: Generate::new(Some(allowed)),
-            }
+            Instruction::Generate(Generate::new(Some(allowed)))
         } else {
-            Instruction::Write {
-                write: Write::new(vec![self.eos_token_id as i32]),
-            }
+            Instruction::Write(Write::new(vec![self.eos_token_id as i32]))
         }
     }
 
     pub fn collect_finished_states(&self) -> Result<FxHashMap<u32, FxHashMap<u32, u32>>> {
         let mut finished_states = FxHashMap::default();
-    
+
         let start_index = match self.max_returned_state.get() {
             Some(n) => n + 1,
             None => 0,
         };
-    
+
         let mut last_index_processed = None;
-    
+
         for index in start_index..self.states_to_token_maps.len() {
             let state_is_done = {
                 let notifier = &self.state_notifiers[index];
@@ -375,7 +245,7 @@ impl LazyFSMIndex {
                 let done = atomic.load(Ordering::Acquire);
                 done
             };
-    
+
             if state_is_done {
                 if let Some(state_map) = self.get_state_map(index as u32) {
                     finished_states.insert(index as u32, state_map.clone());
@@ -385,19 +255,19 @@ impl LazyFSMIndex {
                 break;
             }
         }
-    
+
         if let Some(index) = last_index_processed {
             self.max_returned_state.set(Some(index));
         }
         Ok(finished_states)
-    } 
+    }
 
     pub fn await_state(&self, state_index: u32) -> Result<()> {
         if (state_index as usize) >= self.states_to_token_maps.len() {
             bail!(
                 "State {} is not in computed states, and is not set to be computed. Does this state exist?",
                 state_index
-            );            
+            );
         }
 
         let notifier = &self.state_notifiers[state_index as usize];
@@ -413,7 +283,7 @@ impl LazyFSMIndex {
     }
 
     /// this function is only here for debug stuff.
-    /// it is not part of the object api. 
+    /// it is not part of the object api.
     pub fn get_allowed_token_ids(&self, state: i32) -> Vec<i32> {
         if state == -1 {
             return vec![self.eos_token_id as i32];
@@ -468,4 +338,3 @@ impl LazyFSMIndex {
         )
     }
 }
-

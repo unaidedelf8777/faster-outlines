@@ -143,8 +143,8 @@ class LazyVLLMRegexGuide():
         # this way the inference thread is never blocked for large computations like fsm compilation
         # also because interegular.fsm.FSM is serializable, unlike the LazyFSMIndex.
         self.base_fsm = build_regex(regex_string)
-        self.final_states = set(self.base_fsm.fsm_info['finals']) | {-1}
-        self.states = self.base_fsm.fsm_info['states']
+        self.final_states = set(self.base_fsm.fsm_info.finals) | {-1}
+        self.states = self.base_fsm.fsm_info.states
 
     def get_next_instruction(self, state: int):
         """Return the next instruction for guided generation.
