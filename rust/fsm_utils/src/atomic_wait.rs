@@ -1,5 +1,7 @@
 // This is basically identical to https://docs.rs/atomic-wait/latest/atomic_wait/
 // just modified so that it works with AtomicBool instead of AtomicU32
+// This doesnt have docs because I dont know CPP, so this is foreign to me.
+// Someone feel free to document it though, would be appreciated.
 #![allow(dead_code)]
 #[cfg(target_os = "linux")]
 pub mod platform {

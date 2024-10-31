@@ -1,6 +1,5 @@
 from .regex import (
-    create_fsm_index_end_to_end as create_fsm_index_tokenizer,
-    create_token_vocabulary_from_tokenizer
+    create_fsm_index_end_to_end
 )
 
 from .fsm_utils import (
@@ -19,8 +18,7 @@ from .guide import (
 
 __all__ = [
     "TokenVocabulary",
-    "create_fsm_index_tokenizer", 
-    "create_token_vocabulary_from_tokenizer",
+    "create_fsm_index_end_to_end", 
     "Generate", 
     "Write", 
     "RegexGuide", 

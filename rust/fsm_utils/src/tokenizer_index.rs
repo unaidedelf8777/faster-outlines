@@ -76,6 +76,42 @@ fn walk_fsm(
     accepted_states
 }
 
+/// Maps a single FSM state to its valid token transitions.
+/// 
+/// For each vocabulary token:
+/// 1. Walks the FSM using the token's transition sequence
+/// 2. If walk succeeds (partial or full), records (token_id, end_state) pair
+/// 
+/// # Arguments
+/// * `fsm_info` - FSM definition with transitions and final states
+/// * `vocabulary` - List of token IDs for each vocab entry
+/// * `vocabulary_transition_keys` - Pre-computed transition sequences for each token
+/// * `start_state` - State to compute transitions for
+/// 
+/// # Returns
+/// Set of (token_id, end_state) pairs representing valid transitions
+/// 
+/// # Example
+/// For pattern "[a-c]+" at state 0:
+/// ```text
+/// Vocabulary:
+/// - "a" -> [7]     transition_keys: [0]
+/// - "b" -> [8]     transition_keys: [1]  
+/// - "c" -> [9]     transition_keys: [2]
+/// - "ab" -> [15]   transition_keys: [0,1]
+/// - "bc" -> [16]   transition_keys: [1,2]
+/// 
+/// FSM walks:
+/// "a":  0 --[0]--> 1  ✓ Add (7,1)
+/// "b":  0 --[1]--> 1  ✓ Add (8,1)
+/// "c":  0 --[2]--> 1  ✓ Add (9,1)
+/// "ab": 0 --[0]--> 1 --[1]--> 1  ✓ Add (15,1)
+/// "bc": 0 --[1]--> 1 --[2]--> 1  ✓ Add (16,1)
+/// 
+/// Returns: {(7,1), (8,1), (9,1), (15,1), (16,1)}
+/// ```
+/// Note this walking example is naive, and does not account for anything_else_value,
+/// or a few other conditions, such as final state logic, but it gets the point across.
 fn state_scan_tokens(
     fsm_info: &FSMInfo,
     vocabulary: &[Vec<u32>],
@@ -99,6 +135,94 @@ fn state_scan_tokens(
         .collect::<FxHashSet<(u32, u32)>>()
 }
 
+/// Core FSM computation function that builds token transition maps.
+/// 
+/// # Memory Layout
+/// The function receives shared memory structures from LazyFSMIndex:
+/// - return_to: Pre-allocated state transition tables (Arc<Vec<ThreadSafeCell>>)
+/// - state_notifiers: Atomic flags for completion status (Arc<Vec<Arc<AtomicBool>>>)
+/// 
+/// # Processing Flow
+/// 1. Setup Phase:
+///    - Converts vocabulary into numeric transition keys
+///    - Strips string data to minimize memory during computation
+///    - Each token gets mapped to its FSM transition sequence
+/// 
+/// 2. State Processing:
+///    - Processes each FSM state independently
+///    - For each state:
+///      a. Simulates FSM walks for all vocabulary tokens
+///      b. Records valid (token_id, end_state) pairs
+///      c. Writes results directly to shared memory
+///      d. Signals completion via atomic flag
+/// 
+/// # Memory Safety
+/// - Writes to shared memory are safe because:
+///   1. Each state's map is accessed only by one thread
+///   2. ThreadSafeCell provides zero-copy access
+///   3. Atomic flags synchronize readers/writer
+///
+/// # Example Flow
+/// For pattern "[a-c]+" and vocabulary:
+/// ```text
+/// {
+///   "a": [7],    // token ID for 'a'
+///   "b": [8],    // token ID for 'b'
+///   "c": [9],    // token ID for 'c'
+///   "ab": [15],  // token ID for string "ab"
+///   "bc": [16]   // token ID for string "bc"
+/// }
+/// ```
+/// 
+/// FSM structure:
+/// ```text
+/// State 0 (start) --[a,b,c]--> State 1 (accept) --[a,b,c]--> State 1 (loop)
+/// 
+/// transitions = {
+///   (0,'a') -> 1,  // 'a' is transition key 0
+///   (0,'b') -> 1,  // 'b' is transition key 1
+///   (0,'c') -> 1,  // 'c' is transition key 2
+///   (1,'a') -> 1,
+///   (1,'b') -> 1,
+///   (1,'c') -> 1
+/// }
+/// ```
+/// 
+/// Processing flow:
+/// ```text
+/// 1. Setup:
+///    alphabet_symbol_mapping = {"a": 0, "b": 1, "c": 2}
+///    Create transition keys for each vocab token:
+///      "a"  -> [0]     // single char 'a' maps to transition 0
+///      "b"  -> [1]     // single char 'b' maps to transition 1
+///      "c"  -> [2]     // single char 'c' maps to transition 2
+///      "ab" -> [0, 1]  // chars 'a','b' map to transitions 0,1
+///      "bc" -> [1, 2]  // chars 'b','c' map to transitions 1,2
+/// 
+/// 2. Process State 0:
+///    Walk FSM for each token's transition sequence:
+///    - "a" [0]     -> ends in state 1 ✓
+///    - "b" [1]     -> ends in state 1 ✓
+///    - "c" [2]     -> ends in state 1 ✓
+///    - "ab" [0,1]  -> no valid path (multi-char not accepted here)
+///    - "bc" [1,2]  -> no valid path (multi-char not accepted here)
+///    Write to state 0's map: {7->1, 8->1, 9->1}
+///    Signal state 0 complete via futex
+/// 
+/// 3. Process State 1:
+///    Walk FSM for each token:
+///    - "a" [0]     -> ends in state 1 ✓
+///    - "b" [1]     -> ends in state 1 ✓
+///    - "c" [2]     -> ends in state 1 ✓
+///    - "ab" [0,1]  -> ends in state 1 ✓
+///    - "bc" [1,2]  -> ends in state 1 ✓
+///    Write to state 1's map: {7->1, 8->1, 9->1}
+///    Signal state 1 complete via futex
+///     
+///    Note how even though "ab", and "bc" are multiple transitions, they are
+///    Still accepted because they still follow transitions which are valid
+///    for state 1 ( [a-c]+ ).
+/// ```
 pub(crate) fn create_fsm_index_end_to_end(
     fsm_info: &FSMInfo,
     vocabulary: &TokenVocabulary,
@@ -109,6 +233,7 @@ pub(crate) fn create_fsm_index_end_to_end(
         .into_iter()
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect::<Vec<(String, Vec<u32>)>>();
+    
     let alphabet_symbol_mapping: FxHashMap<char, u32> = fsm_info
         .alphabet_symbol_mapping
         .iter()

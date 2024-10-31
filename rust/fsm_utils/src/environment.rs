@@ -14,6 +14,30 @@
 use once_cell::sync::Lazy;
 use std::env;
 
+/// Maximum number of FSM patterns to cache.
+///
+/// # Environment Configuration
+/// Set via `FASTER_OUTLINES_CACHE_SIZE` environment variable.
+///
+/// # Default Behavior
+/// - Default size: 100 patterns
+/// - Implements LRU eviction policy
+/// - Thread-safe access via Lazy initialization
+///
+/// Set the env var like so:
+/// ```bash
+/// export FASTER_OUTLINES_CACHE_SIZE=[INTEGER]
+/// ```
+///
+/// # Memory Impact
+/// Cache size directly affects memory usage:
+/// - Each cached pattern stores its complete FSM structure
+/// - Memory per pattern varies with pattern complexity
+/// - Consider available RAM when configuring
+///
+/// # Performance Implications
+/// - Larger cache → Better hit rate → Faster pattern matching
+/// - Smaller cache → Lower memory usage → Possible repeated computation
 pub static FSM_CACHE_SIZE: Lazy<usize> = Lazy::new(|| {
     env::var("FASTER_OUTLINES_CACHE_SIZE")
         .ok()
@@ -21,6 +45,43 @@ pub static FSM_CACHE_SIZE: Lazy<usize> = Lazy::new(|| {
         .unwrap_or(100)
 });
 
+/// Global flag to disable the FSM caching system.
+///
+/// # Environment Configuration
+/// Set via `FASTER_OUTLINES_DISABLE_CACHE` environment variable.
+///
+/// # Accepted Values
+/// - Enable cache (default):
+///   - Not set
+///   - Empty string
+///   - "0"
+///   - "false"
+///   - "no"
+/// - Disable cache:
+///   - "1"
+///   - "true"
+///   - "yes"
+///   Case insensitive for all values
+///
+/// control the env var like so:
+/// ```bash
+/// # Disable caching
+/// export FASTER_OUTLINES_DISABLE_CACHE=true
+///
+/// # Enable caching (default)
+/// export FASTER_OUTLINES_DISABLE_CACHE=false
+/// # or
+/// unset FASTER_OUTLINES_DISABLE_CACHE
+/// ```
+///
+/// # When to Disable
+/// 1. Debugging FSM computation
+/// 2. Testing pattern matching
+/// 3. Memory-critical environments
+/// 4. Ensuring deterministic behavior
+///
+/// # Logging Behavior
+/// Prints confirmation message to stdout when cache is disabled
 pub static DISABLE_CACHE: Lazy<bool> =
     Lazy::new(|| match env::var("FASTER_OUTLINES_DISABLE_CACHE") {
         Ok(val) => {

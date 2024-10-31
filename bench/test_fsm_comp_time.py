@@ -5,7 +5,7 @@ import os
 os.environ['FASTER_OUTLINES_DISABLE_CACHE'] = 'true'
 
 import faster_outlines
-from faster_outlines.fsm import create_token_vocabulary_from_tokenizer, Write, Generate
+from faster_outlines.fsm import TokenVocabulary, Write, Generate
 from transformers import AutoTokenizer
 from json import dumps as json_dumps
 
@@ -102,8 +102,12 @@ tokenizer = TransformerTokenizer(
     # AutoTokenizer.from_pretrained("meta-llama/Llama-3.1-8B-Instruct") 
 )
 
-tokenvocab = create_token_vocabulary_from_tokenizer(
-    AutoTokenizer.from_pretrained("teknium/OpenHermes-2.5-Mistral-7B")
+t = AutoTokenizer.from_pretrained("teknium/OpenHermes-2.5-Mistral-7B")
+tokenvocab = TokenVocabulary(
+    t.get_vocab(),
+    t.eos_token_id,
+    set(t.all_special_tokens)
+    
 )
 
 print(f"Benchmarking tokenizer length: {len(tokenizer.tokenizer)}")

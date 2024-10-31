@@ -27,15 +27,15 @@ pub fn hash_token_vocabulary(vocabulary: &TokenVocabulary) -> u64 {
     let mut hasher = DefaultHasher::new();
     vocabulary.len().hash(&mut hasher);
 
-    if vocabulary.tokens.len() > 100 {
-        let partition_key = vocabulary.tokens.iter().map(|(k, _)| k).nth(99).unwrap();
+    if vocabulary.len() > 100 {
+        let partition_key = vocabulary.iter().map(|(k, _)| k).nth(99).unwrap();
 
-        for (key, value) in vocabulary.tokens.iter().filter(|(k, _)| k <= partition_key) {
+        for (key, value) in vocabulary.iter().filter(|(k, _)| k <= partition_key) {
             key.hash(&mut hasher);
             value.hash(&mut hasher);
         }
     } else {
-        for (key, value) in vocabulary.tokens.iter() {
+        for (key, value) in vocabulary.iter() {
             key.hash(&mut hasher);
             value.hash(&mut hasher);
         }

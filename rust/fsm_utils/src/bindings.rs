@@ -14,7 +14,7 @@
 #![cfg(feature = "python_bindings")]
 use serde::{Serialize, Deserialize};
 use once_cell::sync::Lazy;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use anyhow::{Result, Context};
 
 use pyo3::{
@@ -68,16 +68,17 @@ impl PyTokenVocabulary {
     // We need to allow none arguments, so pickle'ing works.
     /// Initializes the TokenVocabulary from a Python dictionary.
     #[new]
-    #[pyo3(signature = (py_dict=None, eos_token_id=None))]
-    pub fn new(py_dict: Option<FxHashMap<String, Vec<u32>>>, eos_token_id: Option<u32>) -> PyResult<Self> {
-        match (py_dict, eos_token_id) {
+    #[pyo3(signature = (py_dict=None, eos_token_id=None, special_tokens=None))]
+    pub fn new(py_dict: Option<FxHashMap<String, u32>>, eos_token_id: Option<u32>, special_tokens: Option<FxHashSet<String>>) -> PyResult<Self> {
+        match (py_dict, eos_token_id, special_tokens) {
             // Normal construction
-            (Some(dict), Some(eos)) => {
-                let token_vocabulary = TokenVocabulary::from_hashmap(dict, eos);
+            (Some(dict), Some(eos), Some(special)) => {
+                let token_vocabulary = TokenVocabulary::from_raw_vocab(dict, eos, Some(special))
+                    .with_context(|| format!("Failed to create token vocabulary due to error."))?;
                 Ok(PyTokenVocabulary { vocab: token_vocabulary })
             },
             // Pickle reconstruction (empty instance to be filled by __setstate__)
-            (None, None) => {
+            (None, None, None) => {
                 Ok(PyTokenVocabulary { 
                     vocab: TokenVocabulary::default()
                 })

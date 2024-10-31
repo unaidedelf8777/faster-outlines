@@ -1,34 +1,25 @@
-from typing import Any, Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional, Set
 
 class Write:
-    """Write instruction.
+    """Write instruction for direct token sequences.
 
-    Attributes
-    ----------
-    tokens
-        The sequence of tokens to be added to the current sequence by the
-        generation process.
-
+    Attributes:
+        tokens (List[int]): The sequence of tokens to be added to the current
+            sequence by the generation process.
     """
-
     tokens: List[int]
 
 class Generate:
-    """Generate instruction
+    """Generate instruction for constrained token choices.
 
-    Attributes
-    ----------
-    tokens
-        The tokens that lead to a valid completion if generated.  A value
-        of ``None`` indicates that all tokens are allowed.
+    Attributes:
+        tokens (Optional[List[int]]): The tokens that lead to a valid completion
+            if generated. A value of None indicates that all tokens are allowed.
     """
-
     tokens: Optional[List[int]]
 
 class TokenVocabulary:
-    """
-    TokenVocabulary is a class that manages a vocabulary of tokens, allowing
-    addition and removal of tokens, and serialization for persistence.
+    """TokenVocabulary manages a vocabulary of tokens, with serialization support.
 
     Attributes:
         eos_token_id (int): The end-of-sequence token identifier.
@@ -36,28 +27,23 @@ class TokenVocabulary:
 
     def __init__(
         self,
-        vocab_dict: Optional[Dict[str, List[int]]] = ...,
-        eos_token_id: Optional[int] = ...
+        vocab_dict: Dict[str, List[int]],
+        eos_token_id: int,
+        special_tokens: Set[str]
     ) -> None:
-        """
-        Initializes the TokenVocabulary.
+        """Initialize the TokenVocabulary.
 
         Args:
-            vocab_dict (Optional[Dict[str, List[int]]]): A dictionary mapping
-                token strings to their corresponding list of integer values.
-                If `None`, an empty vocabulary is initialized for deserialization.
-            eos_token_id (Optional[int]): The end-of-sequence token identifier.
-                Must be provided if `vocab_dict` is provided.
-
-        Raises:
-            ValueError: If only one of `vocab_dict` or `eos_token_id` is provided.
+            vocab_dict (Dict[str, List[int]]): Dictionary mapping token strings
+                to their corresponding list of integer values.
+            eos_token_id (int): The end-of-sequence token identifier.
+            special_tokens (Set[str]): Set of tokens to exclude from processing.
         """
         ...
 
     @property
     def eos_token_id(self) -> int:
-        """
-        Gets the end-of-sequence token identifier.
+        """Get the end-of-sequence token identifier.
 
         Returns:
             int: The EOS token ID.
@@ -65,200 +51,152 @@ class TokenVocabulary:
         ...
 
     def add_token(self, token: str, values: List[int]) -> None:
-        """
-        Adds a new token to the vocabulary.
+        """Add a token to the vocabulary.
 
         Args:
             token (str): The token string to add.
-            values (List[int]): A list of integer values associated with the token.
+            values (List[int]): Integer values associated with the token.
         """
         ...
 
     def remove_token(self, token: str) -> Optional[List[int]]:
-        """
-        Removes a token from the vocabulary.
+        """Remove a token from the vocabulary.
 
         Args:
             token (str): The token string to remove.
 
         Returns:
-            Optional[List[int]]: The list of integer values associated with the removed token,
-            or `None` if the token was not found.
+            Optional[List[int]]: Values of removed token, or None if not found.
         """
         ...
 
     def __len__(self) -> int:
-        """
-        Returns the number of tokens in the vocabulary.
+        """Get number of tokens in vocabulary.
 
         Returns:
-            int: The number of tokens.
+            int: Number of tokens.
         """
         ...
 
     def is_empty(self) -> bool:
-        """
-        Checks whether the vocabulary is empty.
+        """Check if vocabulary is empty.
 
         Returns:
-            bool: `True` if the vocabulary is empty, `False` otherwise.
-        """
-        ...
-
-    def __getstate__(self) -> bytes:
-        """
-        Serializes the TokenVocabulary for pickling.
-
-        Returns:
-            bytes: The serialized state of the vocabulary.
-
-        Raises:
-            ValueError: If serialization fails.
-        """
-        ...
-
-    def __setstate__(self, state: bytes) -> None:
-        """
-        Deserializes the TokenVocabulary from a pickled state.
-
-        Args:
-            state (bytes): The serialized state to deserialize.
-
-        Raises:
-            ValueError: If deserialization fails.
+            bool: True if empty, False otherwise.
         """
         ...
 
 def create_fsm_index_end_to_end_rs(
     fsm_info: Dict[str, Any],
-    vocabulary: TokenVocabulary
+    vocabulary: TokenVocabulary,
 ) -> 'LazyFSMIndex':
-    """
-    create_fsm_index_end_to_end_rs(fsm_info, vocabulary, eos_token_id) -> LazyFSMIndex
+    """Create a LazyFSMIndex instance.
 
-    Creates a LazyFSMIndex instance using the provided FSMInfo, TokenVocabulary, and eos_token_id.
+    Args:
+        fsm_info: FSM definition and configuration.
+        vocabulary: Token vocabulary for the FSM.
+    
+    Returns:
+        LazyFSMIndex: New FSM index instance.
+    """
+    ...
+
+def get_cached_fsm(hash: int) -> Dict[str, Any]:
+    """Retrieve cached FSM by hash.
+
+    Args:
+        hash (int): Cache key hash.
+
+    Returns:
+        Dict[str, Any]: Cached FSM data if found.
+
+    Raises:
+        ValueError: If FSM not found in cache.
+    """
+    ...
+
+def get_fsm_cache_key(pattern: str, vocabulary: TokenVocabulary) -> int:
+    """Generate cache key for pattern and vocabulary combination.
+
+    Args:
+        pattern (str): FSM pattern string.
+        vocabulary (TokenVocabulary): Token vocabulary.
+
+    Returns:
+        int: Cache key hash.
     """
     ...
 
 class LazyFSMIndex:
-    """
-    A class representing a lazily computed FSM index.
-
-    Methods:
-        get_states_to_token_subsets() -> Dict[int, Dict[int, int]]
-        collect_finished_states() -> Dict[int, Dict[int, int]]
-        is_final_state(state: int) -> bool
-        is_computing_finished() -> bool
-        await_state(state_index: int) -> None
-        await_finished() -> None
-        allowed_token_ids(state: int) -> List[int]
-        __repr__() -> str
+    """Lazily computed FSM index for efficient pattern matching.
+    
+    Provides asynchronous computation of state transitions with caching.
     """
 
-    def get_states_to_token_subsets(self) -> Dict[int, Dict[int, int]]:
-        """
-        Returns the mapping of states to token subsets.
+    def get_next_state(self, state: int, token_id: int) -> Optional[int]:
+        """Get next state for given current state and token.
+
+        Args:
+            state: Current state ID.
+            token_id: Input token ID.
 
         Returns:
-            Dict[int, Dict[int, int]]: The states to token subsets mapping.
+            Optional[int]: Next state ID if valid transition exists.
+        """
+        ...
+
+    def get_next_instruction(self, state: int) -> 'Write | Generate':
+        """Get next instruction for pattern-guided generation.
+
+        Args:
+            state: Current state ID.
+
+        Returns:
+            Union[Write, Generate]: Next instruction for generation.
         """
         ...
 
     def collect_finished_states(self) -> Dict[int, Dict[int, int]]:
-        """
-        Collects and returns the finished states.
-
-        This is part of a more advanced, asynchronous interface to the object.
-        Note the function is not async, rather it returns instantly with the 
-        data from finished states, not the full index.
+        """Collect newly computed state transitions.
 
         Returns:
-            Dict[int, Dict[int, int]]: The finished states mapping.
-        """
-        ...
+            Dict[int, Dict[int, int]]: Map of state ID to transitions.
 
-    def is_final_state(self, state: int) -> bool:
-        """
-        Checks if the given state is a final state.
-
-        Args:
-            state (int): The state to check.
-
-        Returns:
-            bool: True if final state, False otherwise.
-        """
-        ...
-
-    def is_computing_finished(self) -> bool:
-        """
-        Checks if the computation is finished.
-
-        Returns:
-            bool: True if finished, False otherwise.
+        Raises:
+            ValueError: If collection fails.
         """
         ...
 
     def await_state(self, state_index: int) -> None:
-        """
-        Waits until the specified state is computed.
+        """Wait for specific state computation to complete.
 
         Args:
-            state_index (int): The index of the state to await.
+            state_index: State ID to wait for.
+
+        Raises:
+            ValueError: If state index invalid.
         """
         ...
 
     def await_finished(self) -> None:
-        """
-        Waits until the entire computation is finished.
-        """
+        """Wait for all state computations to complete."""
         ...
 
-    def allowed_token_ids(self, state: int) -> List[int]:
-        """
-        Returns the allowed token IDs for the given state.
+    def get_allowed_token_ids(self, state: int) -> List[int]:
+        """Get allowed tokens for state (debug utility).
 
         Args:
-            state (int): The state for which to get allowed token IDs.
+            state: State ID to check.
 
         Returns:
-            List[int]: A list of allowed token IDs.
+            List[int]: Allowed token IDs.
         """
         ...
-    
-    def get_next_instruction(self, state: int) -> "Instruction":
-        """
-        
-        Returns the next Instruction in the FSM.
-        
-        Args:
-            state (int): The state for which to get the instruction.
 
-        Instructions have two types: 
-            - Write:
-                *tokens* Optional[List[int]]: The tokens to write to the Language model context window.
-                This can include EOS token id if the fsm reaches the final state.
-            
-            - Generate:
-                *tokens* List[int]: The allowed token ID's which are each valid to be chosen 
-                at this state. the language model should choose one.
-        """
-        ...
-    
-    def get_next_state(self, state: int, token_id: int) -> int:
-        """
-        Args:
-            state (int), token_id (int)
-        
-        returns:
-            int, the next state of the fsm, given the state and transition (token_id)
-        """
-        ...
-        
     def __repr__(self) -> str:
-        """
-        Returns a string representation of the LazyFSMIndex instance.
+        """Get string representation.
 
         Returns:
-            str: The string representation.
+            str: Debug representation of FSM index.
         """
         ...

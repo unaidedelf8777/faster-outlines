@@ -5,6 +5,12 @@ from typing import (
     Dict,
     Tuple
 )
+
+from faster_outlines.fsm.fsm_utils import (
+    create_fsm_index_end_to_end_rs,
+    TokenVocabulary,
+    FSMInfo
+)
 from interegular.fsm import (
     FSM,
     Alphabet, 
@@ -12,12 +18,6 @@ from interegular.fsm import (
 )
 from interegular import parse_pattern
 from functools import lru_cache
-from .fsm_utils import (
-    create_fsm_index_end_to_end_rs,
-    TokenVocabulary,
-    FSMInfo
-)
-from .utils import reduced_vocabulary
 from transformers import PreTrainedTokenizerBase
 
 class BetterAlphabet(Alphabet):
@@ -98,13 +98,6 @@ def fsm_to_betterfsm(
 @lru_cache
 def build_regex(regex_string):
     return fsm_to_betterfsm(parse_pattern(regex_string).to_fsm().reduce(), regex_string)
-
-
-
-def create_token_vocabulary_from_tokenizer(tokenizer: PreTrainedTokenizerBase):
-    reduced, _ = reduced_vocabulary(tokenizer)
-
-    return TokenVocabulary(reduced, tokenizer.eos_token_id)
 
 def create_fsm_index_end_to_end(
     regex_str: str,
