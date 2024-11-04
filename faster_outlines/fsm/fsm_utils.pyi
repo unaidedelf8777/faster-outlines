@@ -27,7 +27,7 @@ class TokenVocabulary:
 
     def __init__(
         self,
-        vocab_dict: Dict[str, List[int]],
+        vocab_dict: Dict[str, int],
         eos_token_id: int,
         special_tokens: Set[str]
     ) -> None:

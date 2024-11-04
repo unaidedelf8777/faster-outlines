@@ -11,6 +11,7 @@ from faster_outlines.fsm.fsm_utils import (
     TokenVocabulary,
     FSMInfo
 )
+from .utils import preprocess_token
 from interegular.fsm import (
     FSM,
     Alphabet, 
@@ -59,19 +60,19 @@ class BetterFSM(FSM):
     def fsm_info(self):
         if self.__dict__['_fsm_info'] is None:
             anything_value = self.alphabet.anything_value
-            self.__dict__["_fsm_info"] = FSMInfo(
-                initial=self.initial,
-                finals=list(self.finals),
-                states=list(sorted(self.map.keys())),
-                transitions=self.flat_transition_map,
-                alphabet_anything_value=anything_value,
-                alphabet_symbol_mapping={
+            self.__dict__["_fsm_info"] = {
+                "initial": self.initial,
+                "finals": list(self.finals),
+                "states": list(sorted(self.map.keys())),
+                "transitions": self.flat_transition_map,
+                "alphabet_anything_value": anything_value,
+                "alphabet_symbol_mapping": {
                     k: v
                     for k, v in self.alphabet._symbol_mapping.items()
                     if k != anything_else
                 },
-                pattern=self.pattern
-            )
+                "pattern": self.pattern
+            }
 
         return self.__dict__['_fsm_info']
 
@@ -81,7 +82,7 @@ class BetterFSM(FSM):
             frozenset(self.flat_transition_map.items()),  
             frozenset(self.alphabet._symbol_mapping.items())
         ))
-        
+
 def fsm_to_betterfsm(
     fsm: FSM,
     pattern = None
@@ -95,9 +96,16 @@ def fsm_to_betterfsm(
         states=fsm.map.keys()
     )
 
+
+
 @lru_cache
 def build_regex(regex_string):
-    return fsm_to_betterfsm(parse_pattern(regex_string).to_fsm().reduce(), regex_string)
+    return fsm_to_betterfsm(
+        parse_pattern(regex_string)
+            .to_fsm()
+            .reduce(),
+        regex_string
+    )
 
 def create_fsm_index_end_to_end(
     regex_str: str,
@@ -108,7 +116,7 @@ def create_fsm_index_end_to_end(
     This uses the end-to-end approach of `create_fsm_index_end_to_end`.
     """
     fsm = build_regex(regex_str)
-    fsm_info = fsm.fsm_info
+    fsm_info = FSMInfo(**fsm.fsm_info)
     finals = set(fsm_info.finals)
     lazy_fsm_index = create_fsm_index_end_to_end_rs(fsm_info, vocabulary)
     return lazy_fsm_index, finals, fsm_info.states
@@ -119,7 +127,7 @@ def create_fsm_index_tokenizer(
     frozen_tokens = None
 ): 
     """NOTE: frozen_tokens will be ignored. it is only there to align with the outlines api."""
-    fsm_info = fsm.fsm_info
+    fsm_info = FSMInfo(**fsm.fsm_info)
     
     lazy_fsm_index = create_fsm_index_end_to_end_rs(fsm_info, vocabulary)
     

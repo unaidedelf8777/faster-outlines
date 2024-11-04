@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use rustc_hash::FxHashMap;
+use serde::{Serialize, Deserialize};
 use std::cell::UnsafeCell;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -104,7 +105,7 @@ impl<T> ThreadSafeCell<T> {
 /// State 0 (start) --[digit]--> State 1 --[digit]--> State 1 (loop)
 ///                                      --[EOF]----> State 2 (accept)
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FSMInfo {
     /// Starting state for pattern matching
     /// Start state is always 0 in interegular's case,

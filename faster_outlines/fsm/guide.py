@@ -143,8 +143,8 @@ class LazyVLLMRegexGuide():
         # this way the inference thread is never blocked for large computations like fsm compilation
         # also because interegular.fsm.FSM is serializable, unlike the LazyFSMIndex.
         self.base_fsm = build_regex(regex_string)
-        self.final_states = set(self.base_fsm.fsm_info.finals) | {-1}
-        self.states = self.base_fsm.fsm_info.states
+        self.final_states = set(self.base_fsm.fsm_info['finals']) | {-1}
+        self.states = self.base_fsm.fsm_info['states']
 
     def get_next_instruction(self, state: int):
         """Return the next instruction for guided generation.
@@ -152,7 +152,6 @@ class LazyVLLMRegexGuide():
         since you must have called get_next_state before this function,
         and thus the states data should have already been stored.
         """
-
         if state in self.final_states:
             return Write(torch.tensor([self.eos_token_id]))
         
@@ -168,40 +167,53 @@ class LazyVLLMRegexGuide():
         return Generate(next_tokens_mask)
 
     def get_next_state(self, state: int, token_id: int) -> int:
-        """Update the state of the guide."""
+        """Update the state of the guide.
+        
+        Args:
+            state: Current state ID
+            token_id: Selected token ID
+            
+        Returns:
+            Next state ID or -1 if terminal
+            
+        Raises:
+            RuntimeError: If state map fetch fails
+        """
         if state in self.final_states:
             return -1
+
+        if token_id == self.eos_token_id:
+            return -1
             
-        # Check if the token is the EOS token or the state doesn't exist
-        if token_id == self.eos_token_id or state not in self.states:
+        if state not in self.states:
             return -1
 
-        # Fetch the state-to-token map for the current state
         state_map = self.states_to_token_maps.get(state)
         
         if state_map is None:
-            # The state is being computed, wait for it to finish computation
             self._fetch_states(wait_for=state)
             state_map = self.states_to_token_maps.get(state)
+            
             if state_map is None:
-                raise RuntimeError(f"Failed to fetch state map for state: {state}")
-        
-        # Get the next state using the token_id
+                error_msg = f"Failed to fetch state map for state: {state}"
+                raise RuntimeError(error_msg)
+
         next_state = state_map.get(token_id)
+        
         if next_state is None:
             return -1
-
         return next_state
 
     def _fetch_states(self, wait_for = None):
-        if wait_for is not None:
-            self.fsm.await_state(wait_for)
-        m = self.fsm.collect_finished_states()
-        self.states_to_token_maps.update(m)
-        self.states_to_token_masks.update({
-            k: torch.tensor(list(mapping.keys()), dtype=torch.int)
-            for k, mapping in m.items()
-        })
+        if self.fsm is not None:
+            if wait_for is not None:
+                self.fsm.await_state(wait_for)
+            m = self.fsm.collect_finished_states()
+            self.states_to_token_maps.update(m)
+            self.states_to_token_masks.update({
+                k: torch.tensor(list(mapping.keys()), dtype=torch.int)
+                for k, mapping in m.items()
+            })
         
     @classmethod
     def from_interegular_fsm(
@@ -231,15 +243,12 @@ class LazyVLLMRegexGuide():
         """Restore the object after unpickling."""
         self.__dict__.update(state)
         if self.regex_string and self.tokenizer:
-            (
-                self.fsm,
-                self.empty_token_ids
-            ) = create_fsm_index_tokenizer(
+            
+            self.fsm = create_fsm_index_tokenizer(
                 self.base_fsm,
                 self.tokenizer
             )
             self.states_to_token_masks = {}
-            self._fetch_states(wait_for=1)
             
 
 class VLLMRegexGuide():

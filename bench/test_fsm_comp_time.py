@@ -5,11 +5,13 @@ import os
 os.environ['FASTER_OUTLINES_DISABLE_CACHE'] = 'true'
 
 import faster_outlines
-from faster_outlines.fsm import TokenVocabulary, Write, Generate
+from faster_outlines.fsm import TokenVocabulary
+from faster_outlines.fsm.utils import preprocess_token
 from transformers import AutoTokenizer
 from json import dumps as json_dumps
 
 from outlines_core.fsm.guide import RegexGuide
+from outlines_core.fsm.regex import reduced_vocabulary
 from outlines import clear_cache, disable_cache
 import torch
 from typing import Union, List, Tuple
@@ -94,22 +96,22 @@ test_patterns = [
     r"""\{[\n ]*"id"[\n ]*:[\n ]*(-)?((0|[1-9][0-9]*))(\.[0-9]+)?([eE][+-][0-9]+)?[\n ]*,[\n ]*"work"[\n ]*:[\n ]*\{[\n ]*"id"[\n ]*:[\n ]*(-)?((0|[1-9][0-9]*))(\.[0-9]+)?([eE][+-][0-9]+)?[\n ]*,[\n ]*"name"[\n ]*:[\n ]*"(?:[^"\\\x00-\x1f\x7f-\x9f]|\\.)*"[\n ]*,[\n ]*"composer"[\n ]*:[\n ]*\{[\n ]*"id"[\n ]*:[\n ]*(-)?((0|[1-9][0-9]*))(\.[0-9]+)?([eE][+-][0-9]+)?[\n ]*,[\n ]*"name"[\n ]*:[\n ]*"(?:[^"\\\x00-\x1f\x7f-\x9f]|\\.)*"[\n ]*,[\n ]*"functions"[\n ]*:[\n ]*\[("(?:[^"\\\x00-\x1f\x7f-\x9f]|\\.)*")(,("(?:[^"\\\x00-\x1f\x7f-\x9f]|\\.)*"))*\][\n ]*\}[\n ]*\}[\n ]*,[\n ]*"recording_artists"[\n ]*:[\n ]*\[(\{[\n ]*"id"[\n ]*:[\n ]*(-)?((0|[1-9][0-9]*))(\.[0-9]+)?([eE][+-][0-9]+)?[\n ]*,[\n ]*"name"[\n ]*:[\n ]*"(?:[^"\\\x00-\x1f\x7f-\x9f]|\\.)*"[\n ]*,[\n ]*"functions"[\n ]*:[\n ]*\[("(?:[^"\\\x00-\x1f\x7f-\x9f]|\\.)*")(,("(?:[^"\\\x00-\x1f\x7f-\x9f]|\\.)*"))*\][\n ]*\})(,(\{[\n ]*"id"[\n ]*:[\n ]*(-)?((0|[1-9][0-9]*))(\.[0-9]+)?([eE][+-][0-9]+)?[\n ]*,[\n ]*"name"[\n ]*:[\n ]*"(?:[^"\\\x00-\x1f\x7f-\x9f]|\\.)*"[\n ]*,[\n ]*"functions"[\n ]*:[\n ]*\[("(?:[^"\\\x00-\x1f\x7f-\x9f]|\\.)*")(,("(?:[^"\\\x00-\x1f\x7f-\x9f]|\\.)*"))*\][\n ]*\}))*\][\n ]*\}""",
     r"""choice 1|choice 2|car|truck|dog""",
     r"""long choice 1 giberrish blah blah blah|long choice 2 giberrish blah blah blah""",
+    r"""\n\n"""
 ]
 # The difference in speed for both these tokenizers is roughly proportional
 # to the number of tokens, so just bench with the smaller one.
 tokenizer = TransformerTokenizer(
-    AutoTokenizer.from_pretrained("teknium/OpenHermes-2.5-Mistral-7B")
+    AutoTokenizer.from_pretrained("unsloth/Llama-3.2-1B-Instruct")
     # AutoTokenizer.from_pretrained("meta-llama/Llama-3.1-8B-Instruct") 
 )
 
-t = AutoTokenizer.from_pretrained("teknium/OpenHermes-2.5-Mistral-7B")
+t = AutoTokenizer.from_pretrained("unsloth/Llama-3.2-1B-Instruct")
+
 tokenvocab = TokenVocabulary(
     t.get_vocab(),
     t.eos_token_id,
     set(t.all_special_tokens)
-    
 )
-
 print(f"Benchmarking tokenizer length: {len(tokenizer.tokenizer)}")
 
 def load_previous_results():
@@ -161,6 +163,7 @@ def test_benchmark_compile_fsm():
                 return_time = time_to_return - start_time
                 print(f"Return time: {return_time}")
                 print(f"Initial tokens: {[tokenizer.decode([x])[0] for x in fsm.get_allowed_token_ids(0)[:10]]}")
+                print(f"Outlines initial tokens: {[tokenizer.decode([x])[0] for x in rfsm.get_next_instruction(0).tokens[:10]]}")
 
             print(f"Iteration {j + 1}: {computation_time:.4f} seconds")
 

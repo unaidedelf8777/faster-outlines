@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #![cfg(feature = "python_bindings")]
+// Serde is implemented on data classes for compatibility with
+// multi-python interpreter inference engines like VLLM
 use serde::{Serialize, Deserialize};
 use once_cell::sync::Lazy;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -73,7 +75,7 @@ impl PyTokenVocabulary {
         match (py_dict, eos_token_id, special_tokens) {
             // Normal construction
             (Some(dict), Some(eos), Some(special)) => {
-                let token_vocabulary = TokenVocabulary::from_raw_vocab(dict, eos, Some(special))
+                let token_vocabulary = TokenVocabulary::from_raw_vocab(dict, eos, Some(special), Some(true))
                     .with_context(|| format!("Failed to create token vocabulary due to error."))?;
                 Ok(PyTokenVocabulary { vocab: token_vocabulary })
             },
@@ -195,7 +197,7 @@ impl IntoPy<PyObject> for Instruction {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 #[pyclass(
     name = "FSMInfo"
 )]
@@ -258,6 +260,20 @@ impl PyFSMInfo {
     pub fn pattern(&self) -> String {
         self.0.pattern.clone()
     }
+
+    pub fn __getstate__(&self, py: Python) -> PyResult<PyObject> {
+        let serialized = serde_json::to_string(&self.0)
+            .map_err(|e| PyErr::new::<PyValueError, _>(e.to_string()))?;
+        Ok(serialized.as_bytes().into_py(py))
+    }
+
+    pub fn __setstate__(&mut self, py: Python, state: PyObject) -> PyResult<()> {
+        let bytes: &[u8] = state.extract(py)?;
+        let json_str = std::str::from_utf8(bytes)?;
+        self.0 = serde_json::from_str(json_str)
+            .map_err(|e| PyErr::new::<PyValueError, _>(e.to_string()))?;
+        Ok(())
+    }
 }
 
 impl From<PyFSMInfo> for FSMInfo {
@@ -313,7 +329,7 @@ impl PyLazyFSMIndex {
         })
     }
 
-    pub fn collect_finished_states(&self) -> PyResult<FxHashMap<u32, FxHashMap<u32, u32>>> {
+    pub fn collect_finished_states(&mut self) -> PyResult<FxHashMap<u32, FxHashMap<u32, u32>>> {
         self.inner.collect_finished_states()
             .map_err(|e| PyValueError::new_err(e.to_string()))
     }

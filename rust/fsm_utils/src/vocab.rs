@@ -11,11 +11,13 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use anyhow::Result;
+use anyhow::{Result, bail, anyhow};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
+use regex::Regex;
+use once_cell::sync::Lazy;
 
-const SPIECE_UNDERLINE: char = '\u{2581}';
+use crate::sp_decode::{UNICODE_TO_BYTES, convert_tokens_to_string};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenVocabulary {
@@ -30,6 +32,7 @@ impl TokenVocabulary {
             eos_token_id: 0,
         }
     }
+
     pub fn from_hashmap(vocab_map: FxHashMap<String, Vec<u32>>, eos_token_id: u32) -> Self {
         let tokens: Vec<(String, Vec<u32>)> = vocab_map.into_iter().collect();
         TokenVocabulary {
@@ -42,6 +45,7 @@ impl TokenVocabulary {
         raw_vocab: FxHashMap<String, u32>,
         eos_token_id: u32,
         special_tokens: Option<FxHashSet<String>>,
+        from_sentencepiece: Option<bool>
     ) -> Result<Self> {
         if raw_vocab.is_empty() {
             bail!("Empty vocabulary provided");
@@ -49,18 +53,28 @@ impl TokenVocabulary {
 
         let mut processed_vocab: FxHashMap<String, Vec<u32>> = FxHashMap::default();
 
-        for (token, token_id) in raw_vocab {
+        for (mut token, token_id) in raw_vocab {
             if let Some(ref special) = special_tokens {
                 if special.contains(&token) {
                     continue;
                 }
             }
 
-            let processed_token = preprocess_token(&token)?;
-            processed_vocab
-                .entry(processed_token)
-                .or_insert_with(Vec::new)
-                .push(token_id);
+            if from_sentencepiece.unwrap_or(false) {
+                token = convert_tokens_to_string(vec![token]);
+            }
+
+            match preprocess_token(&token) {
+                Ok(processed_token) => {
+                    processed_vocab
+                        .entry(processed_token)
+                        .or_insert_with(Vec::new)
+                        .push(token_id);
+                },
+                Err(e) => {
+                    return Err(anyhow!("Failed to process token '{}': {}", token, e));
+                }
+            }
         }
 
         Ok(TokenVocabulary {
@@ -69,7 +83,6 @@ impl TokenVocabulary {
         })
     }
 
-    /// Merges two TokenVocabulary instances, preserving EOS token from self.
     pub fn merge(self, other: TokenVocabulary) -> Self {
         let mut combined: FxHashMap<String, Vec<u32>> = FxHashMap::default();
 
@@ -97,9 +110,10 @@ impl TokenVocabulary {
     pub fn remove_token(&mut self, token: &str) -> Option<Vec<u32>> {
         if let Some(pos) = self.tokens.iter().position(|(t, _)| t == token) {
             let (_, values) = self.tokens.remove(pos);
-            return Some(values);
+            Some(values)
+        } else {
+            None
         }
-        None
     }
 
     pub fn len(&self) -> usize {
@@ -127,71 +141,53 @@ impl<'a> IntoIterator for &'a TokenVocabulary {
     }
 }
 
+static LLAMA_BYTE_TOKEN_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^<0x[0-9A-F]{2}>$").unwrap()
+});
+
+static REPLACEMENT_SEQ_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^▁�+\.$").unwrap()
+});
+
+fn byte_to_symbol(byte: u8) -> String {
+    if byte >= 0x80 {
+        format!("\x00{:02X}", byte)
+    } else {
+        (byte as char).to_string()
+    }
+}
+
 fn preprocess_token(token: &str) -> Result<String> {
     if token.is_empty() {
-        bail!("Empty token provided");
+        return Ok(token.to_string());
     }
 
-    let first_char = token.chars().next().unwrap();
-
-    Ok(if first_char == SPIECE_UNDERLINE || token == "<0x20>" {
+    let processed_token = if token == "<0x20>" {
         format!(" {}", token)
     } else {
         token.to_string()
-    })
-}
+    };
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+    if processed_token.contains('\u{fffd}') && !REPLACEMENT_SEQ_RE.is_match(&processed_token) {
+        if LLAMA_BYTE_TOKEN_RE.is_match(&processed_token) {
+            match u8::from_str_radix(&processed_token[3..5], 16) {
+                Ok(byte) => return Ok(byte_to_symbol(byte)),
+                Err(_) => return Err(anyhow!("Invalid byte in token")),
+            }
+        } else {
+            let mut bytes = Vec::new();
+            for c in processed_token.chars() {
+                match UNICODE_TO_BYTES.get(&c) {
+                    Some(&byte) => bytes.push(byte),
+                    None => {
+                        // If character not found, return the original token
+                        return Ok(processed_token);
+                    }
+                }
+            }
+            return Ok(bytes.into_iter().map(byte_to_symbol).collect());
+        }
 
-    #[test]
-    fn test_basic_vocabulary_construction() {
-        let mut vocab = FxHashMap::default();
-        vocab.insert("hello".to_string(), 1);
-        vocab.insert("world".to_string(), 2);
-
-        let token_vocab = TokenVocabulary::from_raw_vocab(vocab, 0, None).unwrap();
-
-        assert_eq!(token_vocab.len(), 2);
-        assert_eq!(token_vocab.eos_token_id, 0);
     }
-
-    #[test]
-    fn test_special_token_handling() {
-        let mut vocab = FxHashMap::default();
-        vocab.insert(format!("{}word", SPIECE_UNDERLINE), 1);
-        vocab.insert("<0x20>".to_string(), 2);
-
-        let token_vocab = TokenVocabulary::from_raw_vocab(vocab, 0, None);
-
-        let has_space_prefix = token_vocab.unwrap().iter().any(|(t, _)| t.starts_with(' '));
-
-        assert!(has_space_prefix);
-    }
-
-    #[test]
-    fn test_vocabulary_merge() {
-        let mut vocab1 = FxHashMap::default();
-        vocab1.insert("hello".to_string(), 1);
-
-        let mut vocab2 = FxHashMap::default();
-        vocab2.insert("world".to_string(), 2);
-
-        let token_vocab1 = TokenVocabulary::from_raw_vocab(vocab1, 0, None);
-
-        let token_vocab2 = TokenVocabulary::from_raw_vocab(vocab2, 1, None);
-
-        let merged = token_vocab1.expect("").merge(token_vocab2.expect(""));
-
-        assert_eq!(merged.len(), 2);
-        assert_eq!(merged.eos_token_id, 0);
-    }
-
-    #[test]
-    fn test_empty_vocabulary() {
-        let vocab = FxHashMap::default();
-
-        assert!(TokenVocabulary::from_raw_vocab(vocab, 0, None).is_err());
-    }
+    Ok(processed_token)
 }

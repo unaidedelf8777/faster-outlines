@@ -23,6 +23,7 @@ pub mod types;
 pub mod vocab;
 mod bindings;
 mod atomic_wait;
+mod sp_decode;
 
 #[cfg(feature = "python_bindings")]
 pub use crate::bindings::fsm_utils;

@@ -13,7 +13,7 @@
 // limitations under the License.
 use crate::types::{StateNotifierMap, StatesToTokenMaps};
 use crate::{
-    atomic_wait::platform::wait,
+    atomic_wait::platform::{wait, wake_all},
     caching::{get_cached_fsm, get_fsm_cache_key, insert_fsm_to_cache, CachedFSM},
     tokenizer_index::create_fsm_index_end_to_end,
     types::{FSMInfo, Generate, Instruction, ThreadSafeCell, Write},
@@ -21,10 +21,10 @@ use crate::{
 };
 use anyhow::Result;
 use rustc_hash::FxHashMap;
-use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
+use fixedbitset::FixedBitSet;
 
 /// LazyFSMIndex implements a lazy-loading finite state machine (FSM) for efficient token sequence matching.
 /// It processes state transitions asynchronously and caches results for improved performance.
@@ -65,10 +65,9 @@ pub struct LazyFSMIndex {
 
     /// bool indicator, just so we dont need to manually iterate
     /// over the notifiers to check if they are all finished.
-    computing_finished: Arc<Mutex<bool>>,
+    computing_finished: Arc<AtomicBool>,
 
-    // state for async interface
-    max_returned_state: Cell<Option<usize>>,
+    returned_states: FixedBitSet
 }
 
 // This impl block holds all methods which are not feature specific,
@@ -92,18 +91,19 @@ impl LazyFSMIndex {
 
                 let state_notifiers: StateNotifierMap = Arc::new(
                     (0..fsm_info.states.len())
-                        .map(|_| Arc::new(AtomicBool::new(false)))
+                        .map(|_| Arc::new(AtomicBool::new(true)))
                         .collect(),
                 );
+                let returned_states_set = FixedBitSet::with_capacity(fsm_info.states.len());
 
                 let fsm_index = LazyFSMIndex {
                     states_to_token_maps: states_to_token_maps,
                     first_state: cached_fsm.first_state,
                     eos_token_id: eos_token_id,
                     finals: cached_fsm.finals.clone(),
-                    computing_finished: Arc::new(Mutex::new(true)),
+                    computing_finished: Arc::new(AtomicBool::new(true)),
                     state_notifiers: state_notifiers,
-                    max_returned_state: Cell::new(None),
+                    returned_states: returned_states_set,
                 };
 
                 return fsm_index;
@@ -122,13 +122,14 @@ impl LazyFSMIndex {
                 );
 
                 let state_notifiers_clone = Arc::clone(&state_notifiers);
-                let computing_finished = Arc::new(Mutex::new(false));
+                let computing_finished = Arc::new(AtomicBool::new(false));
                 let computing_finished_clone = Arc::clone(&computing_finished);
                 let results_clone = Arc::clone(&results);
                 let first_state = fsm_info.initial;
                 let finals = Arc::new(fsm_info.finals.clone());
                 let finals_clone = Arc::clone(&finals);
                 let cache_key_clone = cache_key;
+                let returned_states_set = FixedBitSet::with_capacity(fsm_info.states.len());
 
                 thread::spawn(move || {
                     create_fsm_index_end_to_end(
@@ -137,7 +138,6 @@ impl LazyFSMIndex {
                         &results_clone,
                         &state_notifiers_clone,
                     );
-
                     let cached_fsm = CachedFSM {
                         states_to_token_maps: results_clone
                             .iter()
@@ -147,9 +147,9 @@ impl LazyFSMIndex {
                         finals: finals_clone.to_vec(),
                         hash: cache_key_clone.clone(),
                     };
-
-                    *computing_finished_clone.lock().unwrap() = true;
                     insert_fsm_to_cache(cached_fsm, cache_key_clone);
+                    computing_finished_clone.store(true, Ordering::Release);
+                    wake_all(&*computing_finished_clone);
                 });
                 let finals = finals.to_vec();
                 LazyFSMIndex {
@@ -159,7 +159,7 @@ impl LazyFSMIndex {
                     finals: finals,
                     computing_finished: computing_finished,
                     state_notifiers: state_notifiers,
-                    max_returned_state: Cell::new(None),
+                    returned_states: returned_states_set,
                 }
             }
         }
@@ -212,7 +212,7 @@ impl LazyFSMIndex {
     /// Checks global computation status.
     #[inline(always)]
     fn is_computing_finished(&self) -> bool {
-        *self.computing_finished.lock().unwrap()
+        self.computing_finished.load(Ordering::Acquire)
     }
 }
 
@@ -296,36 +296,33 @@ impl LazyFSMIndex {
     /// which requires data transformation, transport, and possibly copyage.
     /// Because of the transformation, transportm and copyage of data, minimizing the,
     /// ammount of data these ops are applied to increases performance.
-    pub fn collect_finished_states(&self) -> Result<FxHashMap<u32, FxHashMap<u32, u32>>> {
+    pub fn collect_finished_states(&mut self) -> Result<FxHashMap<u32, FxHashMap<u32, u32>>> {
         let mut finished_states = FxHashMap::default();
+        let total_states = self.states_to_token_maps.len();
+        
+        
+        // Check all states, allowing for gaps
+        for index in 0..total_states {
+            // Skip if we've already returned this state
+            if self.returned_states.contains(index) {
+                continue;
+            }
 
-        let start_index = match self.max_returned_state.get() {
-            Some(n) => n + 1,
-            None => 0,
-        };
-
-        let mut last_index_processed = None;
-
-        for index in start_index..self.states_to_token_maps.len() {
             let state_is_done = {
                 let notifier = &self.state_notifiers[index];
                 let atomic = &**notifier;
-                let done = atomic.load(Ordering::Acquire);
-                done
+                atomic.load(Ordering::Acquire)
             };
 
             if state_is_done {
                 if let Some(state_map) = self.get_state_map(index as u32) {
                     finished_states.insert(index as u32, state_map.clone());
-                    last_index_processed = Some(index);
+                    // Mark this state as returned
+                    self.returned_states.set(index, true);
+                } else {
                 }
             } else {
-                break;
             }
-        }
-
-        if let Some(index) = last_index_processed {
-            self.max_returned_state.set(Some(index));
         }
         Ok(finished_states)
     }

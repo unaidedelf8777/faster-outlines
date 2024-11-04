@@ -17,6 +17,7 @@ use crate::{
     vocab::TokenVocabulary,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
+use fixedbitset::FixedBitSet;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -239,7 +240,6 @@ pub(crate) fn create_fsm_index_end_to_end(
         .iter()
         .map(|(k, &v)| (k.chars().next().unwrap(), v))
         .collect();
-
     let vocabulary_transition_keys = create_vocab_transition_vector(
         &alphabet_symbol_mapping,
         fsm_info.alphabet_anything_value,
@@ -248,10 +248,16 @@ pub(crate) fn create_fsm_index_end_to_end(
 
     let vocabulary_entries_only_values: Vec<Vec<u32>> = vocabulary
         .into_iter()
-        .map(|(_, v)| v.clone()) // Remove the String and retain Vec<u32>, to reduce mem usage.
+        .map(|(_, v)| v.clone())
         .collect();
 
-    fsm_info.states.iter().for_each(|&start_state| {
+    let mut seen = FixedBitSet::with_capacity(fsm_info.states.len());
+    let mut next_states: FxHashSet<u32> = FxHashSet::default();
+    next_states.insert(fsm_info.initial);
+
+    while let Some(start_state) = next_states.iter().copied().next() {
+        next_states.remove(&start_state);
+
         let token_ids_end_states = state_scan_tokens(
             fsm_info,
             &vocabulary_entries_only_values,
@@ -261,14 +267,18 @@ pub(crate) fn create_fsm_index_end_to_end(
 
         unsafe {
             let map = return_to[start_state as usize].get();
-            for (token_id, end_state) in token_ids_end_states {
-                map.insert(token_id, end_state);
+            for (token_id, end_state) in &token_ids_end_states {
+                map.insert(*token_id, *end_state);
+                
+                if !seen.contains(*end_state as usize) {
+                    next_states.insert(*end_state);
+                }
             }
         }
 
+        seen.insert(start_state as usize);
         let notifier = Arc::clone(&state_notifiers[start_state as usize]);
-        let atomic = notifier;
-        atomic.store(true, Ordering::Release);
-        wake_all(&*atomic)
-    });
+        notifier.store(true, Ordering::Release);
+        wake_all(&*notifier);
+    }
 }
