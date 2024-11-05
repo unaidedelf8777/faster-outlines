@@ -124,7 +124,7 @@ fn state_scan_tokens(
         .zip(vocabulary_transition_keys.iter())
         .flat_map(|(token_ids, token_transition_keys)| {
             let state_seq = walk_fsm(fsm_info, token_transition_keys, start_state, false);
-            let last_state_opt = if state_seq.len() < token_transition_keys.len() {
+            let last_state_opt = if state_seq.len() < token_transition_keys.len() || state_seq.is_empty() {
                 None
             } else {
                 Some(*state_seq.last().unwrap())

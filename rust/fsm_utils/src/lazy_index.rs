@@ -283,50 +283,6 @@ impl LazyFSMIndex {
         }
     }
 
-    /// Collects newly computed state transitions.
-    ///
-    /// # Collection Strategy
-    /// 1. Start from max_returned_state + 1
-    /// 2. Collect consecutive ready states
-    /// 3. Stop at first pending state
-    /// 4. Update max_returned_state
-    ///
-    /// This is a part of the async API to the LazyFSMIndex object.
-    /// It is particularly useful for bindings, for example Python,
-    /// which requires data transformation, transport, and possibly copyage.
-    /// Because of the transformation, transportm and copyage of data, minimizing the,
-    /// ammount of data these ops are applied to increases performance.
-    pub fn collect_finished_states(&mut self) -> Result<FxHashMap<u32, FxHashMap<u32, u32>>> {
-        let mut finished_states = FxHashMap::default();
-        let total_states = self.states_to_token_maps.len();
-        
-        
-        // Check all states, allowing for gaps
-        for index in 0..total_states {
-            // Skip if we've already returned this state
-            if self.returned_states.contains(index) {
-                continue;
-            }
-
-            let state_is_done = {
-                let notifier = &self.state_notifiers[index];
-                let atomic = &**notifier;
-                atomic.load(Ordering::Acquire)
-            };
-
-            if state_is_done {
-                if let Some(state_map) = self.get_state_map(index as u32) {
-                    finished_states.insert(index as u32, state_map.clone());
-                    // Mark this state as returned
-                    self.returned_states.set(index, true);
-                } else {
-                }
-            } else {
-            }
-        }
-        Ok(finished_states)
-    }
-
     /// Blocks until specific state completes
     /// computation, and can be retrieved.
     ///
@@ -349,9 +305,39 @@ impl LazyFSMIndex {
 
     /// Blocks until all states finish.
     pub fn await_finished(&self) {
-        while !self.is_computing_finished() {
-            thread::sleep(std::time::Duration::from_millis(1));
+        wait(&self.is_computing_finished, false);
+    }
+
+    /// Collects newly computed state transitions.
+    /// 
+    /// This is an api which takes no arguments, and is useful for people building on top of 
+    /// the computed transitions computation of `LazyFSMIndex` who want access to the raw state transitions
+    /// map in realtime, while it is being computed.
+    pub fn collect_finished_states(&mut self) -> Result<FxHashMap<u32, FxHashMap<u32, u32>>> {
+        let mut finished_states = FxHashMap::default();
+        let total_states = self.states_to_token_maps.len();
+        
+        for index in 0..total_states {
+            if self.returned_states.contains(index) {
+                continue;
+            }
+
+            let state_is_done = {
+                let notifier = &self.state_notifiers[index];
+                let atomic = &**notifier;
+                atomic.load(Ordering::Acquire)
+            };
+
+            if state_is_done {
+                if let Some(state_map) = self.get_state_map(index as u32) {
+                    finished_states.insert(index as u32, state_map.clone());
+                    self.returned_states.set(index, true);
+                } else {
+                }
+            } else {
+            }
         }
+        Ok(finished_states)
     }
 
     /// Retrieve a vector of allowed Token ID's at the state `state`

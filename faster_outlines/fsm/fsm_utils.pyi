@@ -7,6 +7,7 @@ class Write:
         tokens (List[int]): The sequence of tokens to be added to the current
             sequence by the generation process.
     """
+
     tokens: List[int]
 
 class Generate:
@@ -16,6 +17,7 @@ class Generate:
         tokens (Optional[List[int]]): The tokens that lead to a valid completion
             if generated. A value of None indicates that all tokens are allowed.
     """
+
     tokens: Optional[List[int]]
 
 class TokenVocabulary:
@@ -26,10 +28,7 @@ class TokenVocabulary:
     """
 
     def __init__(
-        self,
-        vocab_dict: Dict[str, int],
-        eos_token_id: int,
-        special_tokens: Set[str]
+        self, vocab_dict: Dict[str, int], eos_token_id: int, special_tokens: Set[str]
     ) -> None:
         """Initialize the TokenVocabulary.
 
@@ -89,13 +88,13 @@ class TokenVocabulary:
 def create_fsm_index_end_to_end_rs(
     fsm_info: Dict[str, Any],
     vocabulary: TokenVocabulary,
-) -> 'LazyFSMIndex':
+) -> "LazyFSMIndex":
     """Create a LazyFSMIndex instance.
 
     Args:
         fsm_info: FSM definition and configuration.
         vocabulary: Token vocabulary for the FSM.
-    
+
     Returns:
         LazyFSMIndex: New FSM index instance.
     """
@@ -129,7 +128,7 @@ def get_fsm_cache_key(pattern: str, vocabulary: TokenVocabulary) -> int:
 
 class LazyFSMIndex:
     """Lazily computed FSM index for efficient pattern matching.
-    
+
     Provides asynchronous computation of state transitions with caching.
     """
 
@@ -145,7 +144,7 @@ class LazyFSMIndex:
         """
         ...
 
-    def get_next_instruction(self, state: int) -> 'Write | Generate':
+    def get_next_instruction(self, state: int) -> "Write | Generate":
         """Get next instruction for pattern-guided generation.
 
         Args:
@@ -200,3 +199,36 @@ class LazyFSMIndex:
             str: Debug representation of FSM index.
         """
         ...
+
+class FSMInfo:
+    def __init__(
+        self,
+        initial: int,
+        finals: List[int],
+        transitions: Dict[int, int],
+        alphabet_symbol_mapping: Dict[str, int],
+        alphabet_anything_value: int,
+        states: List[int],
+        pattern: str
+    ) -> None: ...
+    
+    @property
+    def initial(self) -> int: ...
+    
+    @property
+    def finals(self) -> List[int]: ...
+    
+    @property
+    def transitions(self) -> Dict[int, int]: ...
+    
+    @property
+    def alphabet_symbol_mapping(self) -> Dict[str, int]: ...
+    
+    @property
+    def alphabet_anything_value(self) -> int: ...
+    
+    @property
+    def states(self) -> List[int]: ...
+    
+    @property
+    def pattern(self) -> str: ...

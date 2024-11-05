@@ -159,6 +159,10 @@ If you have an issue with the lib, please, please open a github issue describing
 
 - This project builds upon the excellent work of the Outlines library.
 
+## Copyright
+This work is licensed under Apache 2.0,
+
+All rights reserved 
 
 ***Citations***:
 

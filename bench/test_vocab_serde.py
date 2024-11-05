@@ -3,7 +3,7 @@ from transformers import AutoTokenizer
 import pickle
 import tempfile
 import os
-from faster_outlines.fsm import TokenVocabulary,  create_token_vocabulary_from_tokenizer
+from faster_outlines.fsm import TokenVocabulary
 
 
 def test_token_vocabulary_serde(tok_name: str):
@@ -17,10 +17,14 @@ def test_token_vocabulary_serde(tok_name: str):
     # Create TokenVocabulary
     print("\nCreating TokenVocabulary...")
     start = time.time()
-    vocab = create_token_vocabulary_from_tokenizer(tokenizer)
+    vocab = TokenVocabulary(
+        tokenizer.get_vocab(),
+        tokenizer.eos_token_id,
+        set(tokenizer.all_special_tokens)
+    )
     vocab_create_time = time.time() - start
     print(f"TokenVocabulary created in {vocab_create_time:.2f}s")
-    print(f"Vocabulary size: {vocab.len()} tokens")
+    print(f"Vocabulary size: {len(tokenizer)} tokens")
 
     # Serialize
     print("\nSerializing TokenVocabulary...")

@@ -1,12 +1,8 @@
 import sys
-from .fsm import (
-    RegexGuide,
-    LazyVLLMRegexGuide,
-    Write,
-    Generate
-)
-    
-def patch(outlines_module, save_to_sys_modules=True, patch_for=None):
+from .fsm import RegexGuide, Write, Generate
+
+
+def patch(outlines_module, save_to_sys_modules=True):
     """
     Patch the vanilla `outlines` module to use the `faster-outlines` backend.
 
@@ -41,23 +37,23 @@ def patch(outlines_module, save_to_sys_modules=True, patch_for=None):
     >>> patched_outlines = patch(outlines)
     >>> # Now, all uses of the module will use the backend from `faster_outlines`.
     """
-    
+
     try:
-        if 'outlines' not in sys.modules:
-            raise ImportError("The outlines module is not loaded in sys.modules. Please import it before patching.")
+        if "outlines" not in sys.modules:
+            raise ImportError(
+                "The outlines module is not loaded in sys.modules. Please import it before patching."
+            )
 
         outlines_module.fsm.guide.Write = Write
         outlines_module.fsm.guide.Generate = Generate
-        if patch_for == "vllm":
-            outlines_module.fsm.guide.RegexGuide = LazyVLLMRegexGuide
-        else:
-            outlines_module.fsm.guide.RegexGuide = RegexGuide
+
+        outlines_module.fsm.guide.RegexGuide = RegexGuide
 
         # Optionally save the modified module to sys.modules
         if save_to_sys_modules:
-            sys.modules['outlines'] = outlines_module
-            sys.modules['outlines.fsm'] = outlines_module.fsm
-            sys.modules['outlines.fsm.guide'] = outlines_module.fsm.guide
+            sys.modules["outlines"] = outlines_module
+            sys.modules["outlines.fsm"] = outlines_module.fsm
+            sys.modules["outlines.fsm.guide"] = outlines_module.fsm.guide
 
     except Exception as e:
         print("ERROR! Patching outlines module failed.")
