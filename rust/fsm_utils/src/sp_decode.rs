@@ -282,7 +282,6 @@ pub fn convert_tokens_to_string(tokens: Vec<String>) -> String {
         .trim()
         .chars()
         .map(|character| {
-            // If the character is not found in the map, keep the character as-is
             UNICODE_TO_BYTES
                 .get(&character)
                 .cloned()

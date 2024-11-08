@@ -90,11 +90,11 @@ impl LazyFSMIndex {
                 );
 
                 let state_notifiers: StateNotifierMap = Arc::new(
-                    (0..fsm_info.states.len())
+                    (0..fsm_info.transitions.len())
                         .map(|_| Arc::new(AtomicBool::new(true)))
                         .collect(),
                 );
-                let returned_states_set = FixedBitSet::with_capacity(fsm_info.states.len());
+                let returned_states_set = FixedBitSet::with_capacity(fsm_info.transitions.len());
 
                 let fsm_index = LazyFSMIndex {
                     states_to_token_maps: states_to_token_maps,
@@ -110,13 +110,13 @@ impl LazyFSMIndex {
             }
             None => {
                 let results: Arc<Vec<ThreadSafeCell<FxHashMap<u32, u32>>>> = Arc::new(
-                    (0..fsm_info.states.len())
+                    (0..fsm_info.transitions.len() + 1)
                         .map(|_| ThreadSafeCell::new(FxHashMap::default()))
                         .collect::<Vec<_>>(),
                 );
 
                 let state_notifiers: StateNotifierMap = Arc::new(
-                    (0..fsm_info.states.len())
+                    (0..fsm_info.transitions.len() + 1)
                         .map(|_| Arc::new(AtomicBool::new(false)))
                         .collect(),
                 );
@@ -129,7 +129,7 @@ impl LazyFSMIndex {
                 let finals = Arc::new(fsm_info.finals.clone());
                 let finals_clone = Arc::clone(&finals);
                 let cache_key_clone = cache_key;
-                let returned_states_set = FixedBitSet::with_capacity(fsm_info.states.len());
+                let returned_states_set = FixedBitSet::with_capacity(fsm_info.transitions.len() + 1);
 
                 thread::spawn(move || {
                     create_fsm_index_end_to_end(
@@ -305,7 +305,7 @@ impl LazyFSMIndex {
 
     /// Blocks until all states finish.
     pub fn await_finished(&self) {
-        wait(&self.is_computing_finished, false);
+        wait(&self.computing_finished, false);
     }
 
     /// Collects newly computed state transitions.

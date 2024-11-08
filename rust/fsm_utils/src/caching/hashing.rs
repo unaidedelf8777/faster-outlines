@@ -30,7 +30,7 @@ pub fn hash_token_vocabulary(vocabulary: &TokenVocabulary) -> u64 {
     if vocabulary.len() > 100 {
         let partition_key = vocabulary.iter().map(|(k, _)| k).nth(99).unwrap();
 
-        for (key, value) in vocabulary.iter().filter(|(k, _)| k <= partition_key) {
+        for (key, value) in vocabulary.iter().filter(|(k, _)| k <= &partition_key) {
             key.hash(&mut hasher);
             value.hash(&mut hasher);
         }

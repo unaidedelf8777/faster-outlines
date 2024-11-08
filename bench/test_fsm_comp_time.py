@@ -150,7 +150,7 @@ def test_benchmark_compile_fsm():
         return_time = None
         for j in range(iterations):
             start_time = time.perf_counter()
-            fsm, fsm_finals, _ = create_fsm_index_end_to_end(pattern, tokenvocab)
+            fsm, fsm_finals = create_fsm_index_end_to_end(pattern, tokenvocab)
             time_to_return = time.perf_counter()
             fsm.await_finished()
             l = fsm.get_next_instruction(state=0)

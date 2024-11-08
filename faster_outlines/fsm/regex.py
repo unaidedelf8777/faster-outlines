@@ -55,7 +55,6 @@ class BetterFSM(FSM):
             self.__dict__["_fsm_info"] = {
                 "initial": self.initial,
                 "finals": list(self.finals),
-                "states": list(sorted(self.map.keys())),
                 "transitions": self.flat_transition_map,
                 "alphabet_anything_value": anything_value,
                 "alphabet_symbol_mapping": {
@@ -104,7 +103,7 @@ def create_fsm_index_end_to_end(
     fsm_info = FSMInfo(**fsm.fsm_info)
     finals = set(fsm_info.finals)
     lazy_fsm_index = create_fsm_index_end_to_end_rs(fsm_info, vocabulary)
-    return lazy_fsm_index, finals, fsm_info.states
+    return lazy_fsm_index, finals
 
 
 def create_fsm_index_tokenizer(

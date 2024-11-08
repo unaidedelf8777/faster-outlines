@@ -45,7 +45,8 @@ use crate::{
         Write,
         Generate,
         Instruction,
-        FSMInfo
+        FSMInfo,
+        TransitionMap
     },
     vocab::TokenVocabulary,
 };
@@ -212,16 +213,15 @@ impl PyFSMInfo {
         transitions: FxHashMap<(u32,u32), u32>,
         alphabet_symbol_mapping: FxHashMap<String, u32>,
         alphabet_anything_value: u32,
-        states: Vec<u32>,
         pattern: String
     ) -> Self {
+        let transitions_map: TransitionMap = transitions.into();
         PyFSMInfo(FSMInfo {
             initial: initial,
             finals: finals,
-            transitions: transitions,
+            transitions: transitions_map,
             alphabet_symbol_mapping: alphabet_symbol_mapping,
             alphabet_anything_value: alphabet_anything_value,
-            states: states,
             pattern: pattern,
         })
     }
@@ -233,12 +233,7 @@ impl PyFSMInfo {
 
     #[getter]
     pub fn finals(&self) -> Vec<u32> {
-        self.0.finals.clone() // Clone to avoid borrowing issues
-    }
-
-    #[getter]
-    pub fn transitions(&self) -> FxHashMap<(u32, u32), u32> {
-        self.0.transitions.clone()
+        self.0.finals.clone() 
     }
 
     #[getter]
@@ -249,11 +244,6 @@ impl PyFSMInfo {
     #[getter]
     pub fn alphabet_anything_value(&self) -> u32 {
         self.0.alphabet_anything_value
-    }
-
-    #[getter]
-    pub fn states(&self) -> Vec<u32> {
-        self.0.states.clone()
     }
 
     #[getter]

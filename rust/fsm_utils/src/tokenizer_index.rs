@@ -16,7 +16,7 @@ use crate::{
     types::{FSMInfo, StateNotifierMap, StatesToTokenMaps},
     vocab::TokenVocabulary,
 };
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use fixedbitset::FixedBitSet;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -25,10 +25,10 @@ use std::sync::Arc;
 fn create_vocab_transition_vector(
     alphabet_symbol_mapping: &FxHashMap<char, u32>,
     alphabet_anything_value: u32,
-    vocabulary: &Vec<(String, Vec<u32>)>,
+    vocabulary: &TokenVocabulary,
 ) -> Vec<Vec<u32>> {
     vocabulary
-        .iter()
+        .into_iter()
         .map(|(token_str, _)| {
             token_str
                 .chars()
@@ -53,8 +53,8 @@ fn walk_fsm(
     let mut last_final_idx = 0;
 
     for (i, &trans_key) in token_transition_keys.iter().enumerate() {
-        match fsm_info.transitions.get(&(state, trans_key)) {
-            Some(&new_state) => {
+        match fsm_info.transitions.get_transition(state as usize, trans_key as usize) {
+            Some(new_state) => {
                 state = new_state;
                 if fsm_info.finals.contains(&state) {
                     last_final_idx = i + 1;
@@ -113,28 +113,28 @@ fn walk_fsm(
 /// ```
 /// Note this walking example is naive, and does not account for anything_else_value,
 /// or a few other conditions, such as final state logic, but it gets the point across.
+/// In other implementations, this code returns a hashset, 
+/// but the results of this function will be dropped in a hashmap anyway,
+/// so no need to deduplicate twice.
 fn state_scan_tokens(
     fsm_info: &FSMInfo,
-    vocabulary: &[Vec<u32>],
+    vocabulary: Vec<&Vec<u32>>,
     vocabulary_transition_keys: &[Vec<u32>],
     start_state: u32,
-) -> FxHashSet<(u32, u32)> {
-    vocabulary
-        .iter()
+) -> Vec<(u32, u32)> {
+    vocabulary.iter()
         .zip(vocabulary_transition_keys.iter())
-        .flat_map(|(token_ids, token_transition_keys)| {
+        .filter_map(|(token_ids, token_transition_keys)| {
             let state_seq = walk_fsm(fsm_info, token_transition_keys, start_state, false);
-            let last_state_opt = if state_seq.len() < token_transition_keys.len() || state_seq.is_empty() {
-                None
+            if state_seq.len() == token_transition_keys.len() {
+                Some((*token_ids.last().unwrap(), *state_seq.last().unwrap()))
             } else {
-                Some(*state_seq.last().unwrap())
-            };
-            token_ids.iter().filter_map(move |&token_id| {
-                last_state_opt.map(|last_state| (token_id, last_state))
-            })
+                None
+            }
         })
-        .collect::<FxHashSet<(u32, u32)>>()
+        .collect()
 }
+
 
 /// Core FSM computation function that builds token transition maps.
 /// 
@@ -229,55 +229,46 @@ pub(crate) fn create_fsm_index_end_to_end(
     vocabulary: &TokenVocabulary,
     return_to: &StatesToTokenMaps,
     state_notifiers: &StateNotifierMap,
-) {
-    let vocabulary = vocabulary
-        .into_iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect::<Vec<(String, Vec<u32>)>>();
-    
+) {   
     let alphabet_symbol_mapping: FxHashMap<char, u32> = fsm_info
         .alphabet_symbol_mapping
         .iter()
         .map(|(k, &v)| (k.chars().next().unwrap(), v))
         .collect();
+
     let vocabulary_transition_keys = create_vocab_transition_vector(
         &alphabet_symbol_mapping,
         fsm_info.alphabet_anything_value,
         &vocabulary,
     );
 
-    let vocabulary_entries_only_values: Vec<Vec<u32>> = vocabulary
-        .into_iter()
-        .map(|(_, v)| v.clone())
-        .collect();
+    let mut seen = FixedBitSet::with_capacity(fsm_info.transitions.len() + 1);
+    let mut next_states = FixedBitSet::with_capacity(fsm_info.transitions.len() + 1);
+    next_states.insert(fsm_info.initial as usize);
 
-    let mut seen = FixedBitSet::with_capacity(fsm_info.states.len());
-    let mut next_states: FxHashSet<u32> = FxHashSet::default();
-    next_states.insert(fsm_info.initial);
-
-    while let Some(start_state) = next_states.iter().copied().next() {
-        next_states.remove(&start_state);
+    while let Some(start_state) = next_states.ones().next() {
+        next_states.set(start_state, false);
 
         let token_ids_end_states = state_scan_tokens(
             fsm_info,
-            &vocabulary_entries_only_values,
+            vocabulary.get_values(),
             &vocabulary_transition_keys,
-            start_state,
+            start_state as u32,
         );
 
         unsafe {
-            let map = return_to[start_state as usize].get();
+            let map = return_to[start_state].get();
             for (token_id, end_state) in &token_ids_end_states {
                 map.insert(*token_id, *end_state);
                 
                 if !seen.contains(*end_state as usize) {
-                    next_states.insert(*end_state);
+                    next_states.insert(*end_state as usize);
                 }
             }
         }
 
-        seen.insert(start_state as usize);
-        let notifier = Arc::clone(&state_notifiers[start_state as usize]);
+        seen.insert(start_state);
+        let notifier = Arc::clone(&state_notifiers[start_state]);
         notifier.store(true, Ordering::Release);
         wake_all(&*notifier);
     }

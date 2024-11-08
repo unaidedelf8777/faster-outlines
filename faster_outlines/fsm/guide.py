@@ -15,8 +15,7 @@ class RegexGuide():
     def __init__(self, regex_string: str, tokenizer: TokenVocabulary):
         (
             self.fsm,
-            _,
-            self.states
+            _
         ) = create_fsm_index_end_to_end(regex_string, tokenizer)
         self.eos_token_id = tokenizer.eos_token_id
         self.get_next_state = self.fsm.get_next_state

@@ -16,6 +16,7 @@ use rustc_hash::FxHashMap;
 use serde::{Serialize, Deserialize};
 use std::cell::UnsafeCell;
 use std::sync::atomic::AtomicBool;
+use smallvec::SmallVec;
 use std::sync::Arc;
 
 /// Memory layout for FSM state transition tables.
@@ -31,6 +32,82 @@ use std::sync::Arc;
 /// 2. May improve memory locality (each state's transitions are contiguous) depending on allocator.
 /// 3. Avoids large contiguous allocations that could cause fragmentation
 pub(crate) type StatesToTokenMaps = Arc<Vec<ThreadSafeCell<FxHashMap<u32, u32>>>>;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateMap {
+    /// Sparse array where `u32::MAX` represents None.
+    /// The index is the transition key, and the u32 in the transitions
+    /// slot signifies the resultant state if you follow that transition.
+    transitions: Vec<u32>,
+}
+
+impl StateMap {
+    pub fn get(&self, transition: usize) -> Option<u32> {
+        self.transitions.get(transition).and_then(|&state| {
+            if state == u32::MAX {
+                None
+            } else {
+                Some(state)
+            }
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransitionMap {
+    transitions: SmallVec<[StateMap; 1024]>,
+}
+
+impl TransitionMap {
+    pub fn get_state(&self, state: usize) -> Option<&StateMap> {
+        self.transitions.get(state)
+    }
+
+    pub fn get_transition(&self, state: usize, transition: usize) -> Option<u32> {
+        self.get_state(state).and_then(|state_map| state_map.get(transition))
+    }
+
+    pub fn iter_state(&self, state: usize) -> Option<impl Iterator<Item = &u32>> {
+        self.get_state(state).map(|state_map| state_map.transitions.iter())
+    }
+
+    pub fn states(&self) -> impl Iterator<Item = usize> {
+        0..self.transitions.len()
+    }
+
+    pub fn len(&self) -> usize {
+        self.transitions.len()
+    }
+}
+
+impl From<FxHashMap<(u32, u32), u32>> for TransitionMap {
+    fn from(map: FxHashMap<(u32, u32), u32>) -> TransitionMap {
+        // Determine the maximum state_id and transition_id to size the sparse arrays
+        let max_state_id = map.keys().map(|(state_id, _)| *state_id).max().unwrap_or(0) as usize;
+        let max_transition_id = map.keys().map(|(_, transition_id)| *transition_id).max().unwrap_or(0) as usize;
+
+        // Initialize a SmallVec for TransitionMap with StateMaps containing sparse arrays
+        let mut transitions: SmallVec<[StateMap; 1024]> = SmallVec::new();
+        transitions.resize_with(max_state_id + 1, || StateMap {
+            transitions: vec![u32::MAX; max_transition_id + 1],
+        });
+
+        // Populate each StateMap's sparse array with transition states
+        for ((state_id, transition_id), target_state) in map {
+            let state_idx = state_id as usize;
+            let transition_idx = transition_id as usize;
+
+            if let Some(state_map) = transitions.get_mut(state_idx) {
+                if transition_idx < state_map.transitions.len() {
+                    state_map.transitions[transition_idx] = target_state;
+                }
+            }
+        }
+
+        TransitionMap { transitions }
+    }
+}
+
 
 /// Thread synchronization primitives for state computation status.
 /// 
@@ -122,10 +199,8 @@ pub struct FSMInfo {
     /// (1, digit_token) -> 1  // Additional digits
     /// (1, eof_token)   -> 2  // End of number
     ///
-    /// Inside of our algorithms, this usually gets re formatted,
-    /// for efficiency and to avoid memory fragmentation. 
-    /// (maps can be very large)
-    pub transitions: FxHashMap<(u32, u32), u32>,
+    /// 
+    pub transitions: TransitionMap,
 
     /// Maps single UTF-8 characters to their transition keys in the FSM.
     /// Keys are contiguous integers starting from 0 to minimize table size/sparsity.
@@ -139,13 +214,6 @@ pub struct FSMInfo {
     /// Special transition value for wildcards and catch-alls.
     /// Used by patterns like ".*" or character class negations
     pub alphabet_anything_value: u32,
-
-    /// All valid states in the FSM. Used for pre-allocation and
-    /// bounds checking during computation
-    ///
-    /// We store this because with a large state machine, 
-    /// it can take a non-negligible amount of time to count states.
-    pub states: Vec<u32>,
     
     /// Source pattern, retained for cache key generation
     pub pattern: String,
