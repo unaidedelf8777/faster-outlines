@@ -1,8 +1,6 @@
 <div align="center" style="margin-bottom: 1em;">
 <h1 style="text-align: center;">Faster-Outlines</h1>
 <img src="https://img.shields.io/pypi/dm/faster-outlines?color=89AC6B&logo=python&logoColor=white&style=flat-square">
-<a href="https://discord.gg/SGJyGg5K"><img src="https://img.shields.io/discord/1182316225284554793?color=81A1C1&logo=discord&logoColor=white&style=flat-square"></img>
-</a>
 </div>
 
 <div align="center">Supercharge your structured text generation with <strong>faster-outlines</strong> - a high-<br>performance Rust backend for the Outlines library.</div>
