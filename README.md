@@ -32,17 +32,22 @@ Upcoming (in no particular order):
 
 3. **Significant Performance Boost**: Especially noticeable with complex regex patterns and large state spaces.
 
-4. **Seamless Integration**: Works with your existing Outlines code with minimal changes.
+4. **Seamless Integration**: Works with your existing Outlines code with minimal changes (outlines v0.0.46, soon all versions).
 
 
 ## Installation
+> [!WARNING]
+> faster_outlines currently only supports linux based operating systems.
+> You can try compiling on systems such as windows, but your better off using [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install)
+> If on a non linux system, you will need to build from source. Make sure you have Rust installed.
 
 ```bash
 pip install faster_outlines
 ```
 
 ## Quick Start
-
+<details>
+<summary>One line patching with outlines (v0.0.46)</summary>
 Integrating faster_outlines into your project is as simple as adding one line of code:
 
 ```python
@@ -113,37 +118,73 @@ schema = '''{
     }
 }'''
 
-model = outlines.models.transformers("mistralai/Mistral-7B-Instruct-v0.2", device="cuda:0", model_kwargs={"load_in_8bit": True})
+model = outlines.models.transformers("mistralai/Mistral-7B-Instruct-v0.2", device="cuda:0")
 print("Model loaded.")
 generator = outlines.generate.json(model, schema)
 character = generator("Give me a character description")
 print(character)
 ```
+</details>
+
+```python
+from faster_outlines.fsm import RegexGuide, TokenVocabulary
+from faster_outlines.sampling import BaseLogitsProcessor
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+model = AutoModelForCausalLM.from_pretrained("NousResearch/Hermes-2-Pro-Llama-3-8B")
+tokenizer = AutoTokenizer.from_pretrained("NousResearch/Hermes-2-Pro-Llama-3-8B")
+
+vocab = TokenVocab(
+    tokenizer.get_vocab(),
+    tokenizer.eos_token_id,
+    set(tokenizer.all_special_tokens)
+)
+
+# Regex for an Email adress
+regex = r"""[a-z0-9!#$%&'*+/=?^_{|}~-]+(?:.[a-z0-9!#$%&'*+/=?^_{|}~-]+)*@(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?"""
+
+guide = RegexGuide(regex, vocab)
+
+m = """<|im_start|>user\nWrite me a funny email adress.\n<|im_end|>\n<|im_start|>assistant\n"""
+
+inputs = tokenizer.encode(m, return_tensors="pt")
+
+logits_processor = BaseLogitsProcessor(guide)
+
+print(
+    model.generate(
+        inputs.to("cuda"),
+        max_new_tokens=100,
+        logits_processors=[logits_processor],
+        do_sample=True
+    )
+)
+```
 
 ## Performance Comparison
 
-![Performance Graph](https://raw.githubusercontent.com/unaidedelf8777/faster-outlines/main/assets/benchmark.png)
-<figcaption style="text-align: center;">Latest as of 7.13.2024 (0.0.46)</figcaption>
+![Performance Graph](./assets/benchmark.png)
 
-However, if you would like to manually control the number of threads used, you can do so via environment variable:
+faster-outlines's regex index compilation time is the time taken to fully compile the index, not the time until the index is usable for sampling. The time until the index is usable for sampling is normally not more than 1ms more than the time taken to compile the regex to a FSM using [interegular](https://github.com/MegaIng/interegular).
 
-```bash
-export FASTER_OUTLINES_NUM_THREADS=<num-threads>
-```
+The raw benchmark results are located in json at `bench/benchmark_results.json`, and the graph is made with `bench/makePrettyGraph.js`
 
-Please note that setting the number of threads to a number higher than the number of cores / logical threads on your machine **WILL DETERIORATE PERFORMANCE**, not improve it.
+## Caching and Env vars
 
-If you would like to test performance at different thread counts on your machine, you can use the script at `tests/test_fsm_comp_time.py`, by first running the script using the automatic thread count ( or what ever you are currently using ), and then the number of threads you are thinking of using.
+`faster-outlines` caches all generated FSMs in a Rust-based LRU Cache. The cache can be controlled using the following environment variables:
+
+- **`FASTER_OUTLINES_CACHE_SIZE`**  
+  - Default: 50  
+  - Type: int  
+
+- **`FASTER_OUTLINES_DISABLE_CACHE`**  
+  - Default: false
+  - Type: String (one of "true" | "1" | "yes")
+
 <br>
 
-
-## Compatibility
-
-`faster_outlines` is designed to be fully compatible with the Outlines API, however, currently only full support for version 0.0.46 ( latest as of 7/13/24 ) can be garunteed.
-
 ## Contributing & Support
-
-We welcome contributions!
+Contributions welcomed!
 
 If you would like to support the further development and more speed improvements for faster_outlines, please consider supporting us on Github sponsors, or make a donation using the *Buy-Me-A-Coffee* link below!
 
@@ -160,9 +201,7 @@ If you have an issue with the lib, please, please open a github issue describing
 - This project builds upon the excellent work of the Outlines library.
 
 ## Copyright
-This work is licensed under Apache 2.0,
-
-All rights reserved 
+This work is licensed under Apache 2.0
 
 ***Citations***:
 

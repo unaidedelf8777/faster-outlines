@@ -42,7 +42,7 @@ pub static FSM_CACHE_SIZE: Lazy<usize> = Lazy::new(|| {
     env::var("FASTER_OUTLINES_CACHE_SIZE")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(100)
+        .unwrap_or(50)
 });
 
 /// Global flag to disable the FSM caching system.
