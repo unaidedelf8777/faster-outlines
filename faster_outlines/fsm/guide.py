@@ -1,11 +1,9 @@
 import interegular
-from typing import Optional, List
-from dataclasses import dataclass
 from .regex import (
     create_fsm_index_end_to_end,
-    fsm_to_betterfsm,
     create_fsm_index_tokenizer,
-    build_regex
+    build_regex,
+    create_fsm_info
 )
 from .fsm_utils import TokenVocabulary
 
@@ -26,13 +24,11 @@ class RegexGuide():
         cls, interegular_fsm: interegular.fsm.FSM, tokenizer
     ):
         instance = cls.__new__(cls)
-
         fsm = interegular_fsm.reduce()
-        fsm = fsm_to_betterfsm(fsm).fsm_info
+        fsm = create_fsm_info(fsm)
         instance.fsm = create_fsm_index_tokenizer(fsm, tokenizer)
         instance.eos_token_id = tokenizer.eos_token_id
         return instance
-    
 
 
 class LazyVLLMRegexGuide():
@@ -60,7 +56,7 @@ class LazyVLLMRegexGuide():
         # We compute the FSM before unpickling / entering the inference thread,
         # this way the inference thread is never blocked for large computations like fsm compilation
         # also because interegular.fsm.FSM is serializable, unlike the LazyFSMIndex.
-        self.base_fsm = build_regex(regex_string).fsm_info
+        self.base_fsm = build_regex(regex_string)
         
     @classmethod
     def from_interegular_fsm(
@@ -68,7 +64,7 @@ class LazyVLLMRegexGuide():
     ):
         instance = cls.__new__(cls)
         fsm = interegular_fsm.reduce()
-        fsm = fsm_to_betterfsm(fsm).fsm_info
+        fsm = create_fsm_info(fsm)
         instance.fsm = create_fsm_index_tokenizer(fsm, tokenizer)
         instance.eos_token_id = tokenizer.eos_token_id
         return instance

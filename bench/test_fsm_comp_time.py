@@ -4,21 +4,14 @@ import os
 
 os.environ['FASTER_OUTLINES_DISABLE_CACHE'] = 'true'
 
-import faster_outlines
 from faster_outlines.fsm import TokenVocabulary
-from faster_outlines.fsm.utils import preprocess_token
 from transformers import AutoTokenizer
-from json import dumps as json_dumps
-
 from outlines_core.fsm.guide import RegexGuide
-from outlines_core.fsm.regex import reduced_vocabulary
 from outlines import clear_cache, disable_cache
 import torch
 from typing import Union, List, Tuple
 
-
 SPIECE_UNDERLINE = "\u2581"
-
 
 class TransformerTokenizer():
     """Represents a tokenizer for models in the `transformers` library."""

@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set
 
 class Write:
     """Write instruction for direct token sequences.
@@ -86,7 +86,7 @@ class TokenVocabulary:
         ...
 
 def create_fsm_index_end_to_end_rs(
-    fsm_info: Dict[str, Any],
+    fsm_info: FSMInfo,
     vocabulary: TokenVocabulary,
 ) -> "LazyFSMIndex":
     """Create a LazyFSMIndex instance.
@@ -97,32 +97,6 @@ def create_fsm_index_end_to_end_rs(
 
     Returns:
         LazyFSMIndex: New FSM index instance.
-    """
-    ...
-
-def get_cached_fsm(hash: int) -> Dict[str, Any]:
-    """Retrieve cached FSM by hash.
-
-    Args:
-        hash (int): Cache key hash.
-
-    Returns:
-        Dict[str, Any]: Cached FSM data if found.
-
-    Raises:
-        ValueError: If FSM not found in cache.
-    """
-    ...
-
-def get_fsm_cache_key(pattern: str, vocabulary: TokenVocabulary) -> int:
-    """Generate cache key for pattern and vocabulary combination.
-
-    Args:
-        pattern (str): FSM pattern string.
-        vocabulary (TokenVocabulary): Token vocabulary.
-
-    Returns:
-        int: Cache key hash.
     """
     ...
 
