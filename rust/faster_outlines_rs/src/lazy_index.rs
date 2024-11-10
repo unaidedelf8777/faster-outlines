@@ -1,16 +1,25 @@
-// Copyright 2024 Nathan Hoos
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/* The MIT License (MIT)
+* Copyright (c) 2024 Nathan Hoos
+*
+* Permission is hereby granted, free of charge, to any person obtaining a copy
+* of this software and associated documentation files (the "Software"), to deal
+* in the Software without restriction, including without limitation the rights
+* to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+* copies of the Software, and to permit persons to whom the Software is
+* furnished to do so, subject to the following conditions:
+* 
+* The above copyright notice and this permission notice shall be included in
+* all copies or substantial portions of the Software.
+* 
+* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+* IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+* AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+* LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+* OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+* THE SOFTWARE.
+*/
+
 use crate::types::{StateNotifierMap, StatesToTokenMaps};
 use crate::{
     atomic_wait::platform::{wait, wake_all},
@@ -67,7 +76,10 @@ pub struct LazyFSMIndex {
     /// over the notifiers to check if they are all finished.
     computing_finished: Arc<AtomicBool>,
 
-    returned_states: FixedBitSet
+    returned_states: FixedBitSet,
+
+    // Bypasses all awaiting mechanisms, if the map is cached.
+    is_cached: bool
 }
 
 // This impl block holds all methods which are not feature specific,
@@ -81,13 +93,6 @@ impl LazyFSMIndex {
 
         match cache_entry {
             Some(cached_fsm) => {
-                let states_to_token_maps: Arc<Vec<ThreadSafeCell<FxHashMap<u32, u32>>>> = Arc::new(
-                    cached_fsm
-                        .states_to_token_maps
-                        .iter()
-                        .map(|map| ThreadSafeCell::new(map.clone()))
-                        .collect(),
-                );
 
                 let state_notifiers: StateNotifierMap = Arc::new(
                     (0..fsm_info.transitions.len())
@@ -97,13 +102,14 @@ impl LazyFSMIndex {
                 let returned_states_set = FixedBitSet::with_capacity(fsm_info.transitions.len());
 
                 let fsm_index = LazyFSMIndex {
-                    states_to_token_maps: states_to_token_maps,
-                    first_state: cached_fsm.first_state,
+                    states_to_token_maps: Arc::clone(&cached_fsm.states_to_token_maps),
+                    first_state: cached_fsm.first_state.clone(),
                     eos_token_id: eos_token_id,
                     finals: cached_fsm.finals.clone(),
                     computing_finished: Arc::new(AtomicBool::new(true)),
                     state_notifiers: state_notifiers,
                     returned_states: returned_states_set,
+                    is_cached: true,
                 };
 
                 return fsm_index;
@@ -139,11 +145,8 @@ impl LazyFSMIndex {
                         &state_notifiers_clone,
                     );
                     let cached_fsm = CachedFSM {
-                        states_to_token_maps: results_clone
-                            .iter()
-                            .map(|cell| unsafe { &*cell.get_ref() }.clone())
-                            .collect(),
-                        first_state,
+                        first_state: first_state,
+                        states_to_token_maps: Arc::clone(&results_clone),
                         finals: finals_clone.to_vec(),
                         hash: cache_key_clone.clone(),
                     };
@@ -160,6 +163,7 @@ impl LazyFSMIndex {
                     computing_finished: computing_finished,
                     state_notifiers: state_notifiers,
                     returned_states: returned_states_set,
+                    is_cached: false,
                 }
             }
         }
@@ -178,22 +182,36 @@ impl LazyFSMIndex {
     /// - O(1) access after computation
     /// - Blocking if state pending
     fn get_state_map(&self, state: u32) -> Option<&FxHashMap<u32, u32>> {
-        if state as usize >= self.states_to_token_maps.len() {
-            return None;
-        }
+        match self.is_cached {
+            false => {
+                if state as usize >= self.states_to_token_maps.len() {
+                    return None;
+                }
+        
+                let notifier = {
+                    match self.state_notifiers.get(state as usize) {
+                        Some(notifier_ref) => notifier_ref,
+                        None => return None,
+                    }
+                };
+        
+                let atomic = &**notifier;
+                wait(&atomic, false); // if the value is false, wait.
+        
+                let cell = &self.states_to_token_maps[state as usize];
+                return Some(unsafe { &*cell.get_ref() });
+            },
+            true => {
+                if state as usize >= self.states_to_token_maps.len() {
+                    return None;
+                } else {
+                    let cell = &self.states_to_token_maps[state as usize];
+                    return Some(unsafe { &*cell.get_ref() });
+                }
 
-        let notifier = {
-            match self.state_notifiers.get(state as usize) {
-                Some(notifier_ref) => notifier_ref,
-                None => return None,
             }
-        };
-
-        let atomic = &**notifier;
-        wait(&atomic, false); // if the value is false, wait.
-
-        let cell = &self.states_to_token_maps[state as usize];
-        Some(unsafe { &*cell.get_ref() })
+        }
+        
     }
 
     /// Tests if state represents pattern match.

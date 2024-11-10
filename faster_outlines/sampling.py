@@ -1,14 +1,16 @@
 # Credit: This is the same logits processor from 
 # VLLM. specifically from https://github.com/vllm-project/vllm/blob/main/vllm/model_executor/guided_decoding/outlines_logits_processors.py
 # Adapted to be more lightweight, and drop support for the CFGGuide used in the file.
+# Licensed under the Apache-2.0.
+# if needed, obtain a copy of the license from https://www.apache.org/licenses/LICENSE-2.0
 import torch
 from typing import List
 from collections import defaultdict
 from faster_outlines.fsm import Write, Generate
 
 class BaseLogitsProcessor:
-    def __init__(self, guide: "Guide"):
-        self._guide: "Guide" = guide
+    def __init__(self, guide):
+        self._guide = guide
         self._fsm_state = defaultdict(int)
 
     def __call__(self, input_ids: List[int],

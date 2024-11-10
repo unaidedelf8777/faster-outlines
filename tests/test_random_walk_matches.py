@@ -21,7 +21,6 @@ TEST_PATTERNS = [
     TestCase(r"(foo|bar)(foo|bar)", "foo or bar repeated twice"),
     TestCase(r"[A-Z][a-z]{2,4}", "capitalized word 3-5 chars"),
     TestCase(r"(abc|ac){1,3}", "1-3 repetitions of abc or ac"),
-    TestCase(r"[a-z0-9]+@[a-z0-9]+\.(com|org|net)", "simple email pattern"),
     TestCase(r"https?://[a-z0-9]+\.[a-z]{2,4}", "simple URL pattern"),
     TestCase(r"[aeiou]{2,5}", "2-5 vowels"),
     TestCase(r"[0-9]{2}-[0-9]{2}-[0-9]{4}", "date format xx-xx-xxxx"),

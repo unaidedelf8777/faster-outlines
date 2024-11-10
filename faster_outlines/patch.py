@@ -49,7 +49,6 @@ def patch(outlines_module, save_to_sys_modules=True):
 
         outlines_module.fsm.guide.RegexGuide = RegexGuide
 
-        # Optionally save the modified module to sys.modules
         if save_to_sys_modules:
             sys.modules["outlines"] = outlines_module
             sys.modules["outlines.fsm"] = outlines_module.fsm

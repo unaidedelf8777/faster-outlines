@@ -1,16 +1,25 @@
-// Copyright 2024 Nathan Hoos
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/* The MIT License (MIT)
+* Copyright (c) 2024 Nathan Hoos
+*
+* Permission is hereby granted, free of charge, to any person obtaining a copy
+* of this software and associated documentation files (the "Software"), to deal
+* in the Software without restriction, including without limitation the rights
+* to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+* copies of the Software, and to permit persons to whom the Software is
+* furnished to do so, subject to the following conditions:
+* 
+* The above copyright notice and this permission notice shall be included in
+* all copies or substantial portions of the Software.
+* 
+* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+* IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+* AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+* LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+* OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+* THE SOFTWARE.
+*/
+
 #![cfg(feature = "python_bindings")]
 // Serde is implemented on data classes for compatibility with
 // multi-python interpreter inference engines like VLLM
@@ -25,10 +34,6 @@ use pyo3::{
     exceptions::{
         PyRuntimeError,
         PyValueError,
-    },
-    types::{
-        PyDict,
-        PyList
     }
 };
 use crate::{
@@ -36,10 +41,7 @@ use crate::{
         LazyFSMIndex
     },
     caching::{
-        MODULE_STATE,
-        get_cached_fsm,
-        get_fsm_cache_key,
-        CachedFSM
+        MODULE_STATE
     },
     types::{
         Write,
@@ -54,7 +56,7 @@ use crate::{
 #[derive(Serialize, Deserialize)]
 #[pyclass(
     name = "TokenVocabulary",
-    module = "faster_outlines.fsm.fsm_utils"
+    module = "faster_outlines.lib"
 )]
 pub struct PyTokenVocabulary {
     pub vocab: TokenVocabulary,
@@ -342,50 +344,6 @@ impl PyLazyFSMIndex {
     }
 }
 
-impl IntoPy<PyObject> for CachedFSM {
-    fn into_py(self, py: Python<'_>) -> PyObject {
-        let dict = PyDict::new_bound(py);
-
-        let maps_vec: Vec<PyObject> = self.states_to_token_maps
-            .into_iter()
-            .map(|map| {
-                let py_map = PyDict::new_bound(py);
-                for (k, v) in map {
-                    let _ = py_map.set_item(k, v);
-                }
-                py_map.into()
-            })
-            .collect();
-        let maps = PyList::new_bound(py, &maps_vec);
-
-        let _ = dict.set_item("states_to_token_maps", maps);
-        let _ = dict.set_item("first_state", self.first_state);
-        let _ = dict.set_item("finals", &self.finals);
-        let _ = dict.set_item("hash", self.hash);
-
-        dict.into()
-    }
-}
-
-#[pyfunction(name = "get_cached_fsm")]
-pub(crate) fn get_cached_fsm_py(py: Python, hash: u64) -> PyResult<PyObject> {
-    match get_cached_fsm(hash) {
-        Some(cached_fsm_arc) => {
-            let cached_fsm = std::sync::Arc::try_unwrap(cached_fsm_arc)
-                .unwrap_or_else(|arc| (*arc).clone());
-            Ok(cached_fsm.into_py(py)) 
-        }
-        None => {
-            Err(PyValueError::new_err("CachedFSM not found for the given hash"))
-        }
-    }
-}
-#[pyfunction(name = "get_fsm_cache_key")]
-pub(crate) fn get_fsm_cache_key_py(py: Python, pattern: String, vocab: Py<PyTokenVocabulary>) -> u64 {
-    get_fsm_cache_key(&pattern, &vocab.borrow(py).vocab_as_ref())
-}
-
-
 #[pyfunction(name = "create_fsm_index_end_to_end_rs")]
 #[pyo3(text_signature = "(fsm_info, vocabulary, eos_token_id)")]
 pub(crate) fn create_fsm_index_end_to_end_<'py>(
@@ -408,11 +366,9 @@ pub(crate) fn create_fsm_index_end_to_end_<'py>(
 }
 
 #[pymodule]
-pub fn fsm_utils(m: &Bound<'_, PyModule>) -> PyResult<()> {
+pub fn lib(m: &Bound<'_, PyModule>) -> PyResult<()> {
     Lazy::force(&MODULE_STATE);
     m.add_function(wrap_pyfunction!(create_fsm_index_end_to_end_, m)?)?;
-    m.add_function(wrap_pyfunction!(get_cached_fsm_py, m)?)?;
-    m.add_function(wrap_pyfunction!(get_fsm_cache_key_py, m)?)?;
 
     m.add_class::<PyFSMInfo>()?;
     m.add_class::<PyLazyFSMIndex>()?;

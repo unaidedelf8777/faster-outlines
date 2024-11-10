@@ -1,6 +1,6 @@
-from typing import Dict, Tuple
+from typing import Dict
 
-from faster_outlines.fsm.fsm_utils import (
+from faster_outlines.lib import (
     create_fsm_index_end_to_end_rs,
     TokenVocabulary,
     # pywrite can't find the class for some reason.
@@ -11,7 +11,10 @@ from interegular import parse_pattern
 from functools import lru_cache
 
 
-def create_fsm_info(fsm: FSM, pattern: str = None) -> dict:
+def create_fsm_info(
+    fsm: FSM, 
+    pattern: str = None #type: ignore
+) -> dict:
     """
     Creates FSM info dictionary with flattened transition map and alphabet information.
     Replaces functionality previously in BetterFSM and BetterAlphabet classes.

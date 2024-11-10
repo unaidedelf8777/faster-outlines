@@ -68,8 +68,7 @@ patch(outlines)
 from outline.fsm.fsm import RegexFSM # Import as usual.
 ```
 
-
-## Example
+A more lengthy but full example:
 
 ```python
 import outlines
@@ -171,15 +170,15 @@ The raw benchmark results are located in json at `bench/benchmark_results.json`,
 
 `faster-outlines` caches all generated FSMs in a Rust-based LRU Cache. The cache can be controlled using the following environment variables:
 
-- **`FASTER_OUTLINES_CACHE_SIZE`**  
-  - Default: 50  
-  - Type: int  
-
-- **`FASTER_OUTLINES_DISABLE_CACHE`**  
-  - Default: false
-  - Type: String (one of "true" | "1" | "yes")
-
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FASTER_OUTLINES_CACHE_SIZE` | 50 | Maximum number of FSMs to cache |
+| `FASTER_OUTLINES_DISABLE_CACHE` | false | Disable caching ("true"/"1"/"yes") |
 <br>
+
+## Docs
+
+Most of the rust code is thoroughly documented in terms of data structure and methodology. The rust docs and the python binding code, aswell as the `.pyi` file for the compiled portion of the lib should be sufficient for most. If you have any questions which the comments and code don't aswer feel free to open an issue. 
 
 ## Contributing & Support
 Contributions welcomed!
@@ -199,7 +198,7 @@ If you have an issue with the lib, please, please open a github issue describing
 - This project builds upon the excellent work of the Outlines library.
 
 ## Copyright
-This work is licensed under Apache 2.0
+This work is dual licensed under apache-2.0 and MIT. find more info in the LICENSE file.
 
 ***Citations***:
 

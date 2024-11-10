@@ -1,6 +1,6 @@
 [project]
 name = "faster_outlines"
-version = "2024.21.10"
+version = "2024.11.10"
 description = "Faster, lazy backend for the `Outlines` library"
 authors = [
 { name = "Nathan Hoos" }
@@ -27,5 +27,5 @@ requires = ["setuptools>=69.5.1", "wheel", "setuptools-rust>=1.9.0"]
 build-backend = "setuptools.build_meta"
 
 [lib]
-name = "fsm_utils" 
+name = "lib" 
 crate-type = ["cdylib"]  

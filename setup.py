@@ -7,10 +7,10 @@ CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 metadata = {
     'name': "faster_outlines",
-    'version': "09.18.2024",
+    'version': "2024.11.10",
     'description': "Faster, lazy backend for the `Outlines` library.",
     'long_description': "", 
-    'authors': ["unaidedelf8777"],
+    'authors': ["Nathan Hoos"],
     'author_email': "thwackyy.y@gmail.com",
     'license': "Apache 2.0",
     'classifiers': [
@@ -22,8 +22,8 @@ metadata = {
 
 rust_extensions = [
     RustExtension(
-        "faster_outlines.fsm.fsm_utils",
-        f"{CURRENT_DIR}/rust/fsm_utils/Cargo.toml",
+        "faster_outlines.lib",
+        f"{CURRENT_DIR}/rust/faster_outlines_rs/Cargo.toml",
         binding=Binding.PyO3,
         args=["--profile=release", "--features=python_bindings"]
     ),
