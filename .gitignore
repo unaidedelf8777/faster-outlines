@@ -6,8 +6,10 @@ __pycache__/
 # C extensions
 *.so
 
-# Rust builds and crap
-function_sampler/fsm/lib/target
+# Lock files
+*.lock
+package-lock.json
+
 wheelhouse/
 # Distribution / packaging
 .Python
@@ -41,8 +43,7 @@ wheelhouse/
 pip-log.txt
 pip-delete-this-directory.txt
 node_modules/
-package.json
-package-lock.json
+
 # Unit test / coverage reports
 htmlcov/
 .tox/

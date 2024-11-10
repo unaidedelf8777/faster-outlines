@@ -1,8 +1,6 @@
 <div align="center" style="margin-bottom: 1em;">
 <h1 style="text-align: center;">Faster-Outlines</h1>
 <img src="https://img.shields.io/pypi/dm/faster-outlines?color=89AC6B&logo=python&logoColor=white&style=flat-square">
-<a href="https://discord.gg/SGJyGg5K"><img src="https://img.shields.io/discord/1182316225284554793?color=81A1C1&logo=discord&logoColor=white&style=flat-square"></img>
-</a>
 </div>
 
 <div align="center">Supercharge your structured text generation with <strong>faster-outlines</strong> - a high-<br>performance Rust backend for the Outlines library.</div>
@@ -18,11 +16,11 @@ Key features:
 - 🏎️ Substantial performance improvements, especially for complex regex patterns ( like JSON )
 - 🔄 Continuous updates to improve speed!
 
-Upcoming:
+Upcoming (in no particular order):
 - 🍴 vLLM fork using faster_outlines
 - 🤝 Official integration with vLLM's main repo (hopefully)
-- Better FSM Caching
 - Redis as a caching backend, for large inference setups
+- 🦀 Rust API. ( currently started, but unfinished )
 
 ## Why faster_outlines?
 
@@ -32,17 +30,22 @@ Upcoming:
 
 3. **Significant Performance Boost**: Especially noticeable with complex regex patterns and large state spaces.
 
-4. **Seamless Integration**: Works with your existing Outlines code with minimal changes.
+4. **Seamless Integration**: Works with your existing Outlines code with minimal changes (outlines v0.0.46, soon all versions).
 
 
 ## Installation
+> [!WARNING]
+> faster_outlines currently only supports linux based operating systems.
+> You can try compiling on systems such as windows, but your better off using [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install)
+> If on a non linux system, you will need to build from source. Make sure you have Rust installed.
 
 ```bash
 pip install faster_outlines
 ```
 
 ## Quick Start
-
+<details>
+<summary>One line patching with outlines (v0.0.46)</summary>
 Integrating faster_outlines into your project is as simple as adding one line of code:
 
 ```python
@@ -55,8 +58,17 @@ patch(outlines)
 # Your code here...
 ```
 
+You can also pass ```save_to_sys_modules=True``` to the patch function, in which case all normal outlines imports will use the modified / patched module.
 
-## Example
+```python
+from faster_outlines import patch
+import outlines
+patch(outlines)
+
+from outline.fsm.fsm import RegexFSM # Import as usual.
+```
+
+A more lengthy but full example:
 
 ```python
 import outlines
@@ -103,50 +115,78 @@ schema = '''{
     }
 }'''
 
-model = outlines.models.transformers("mistralai/Mistral-7B-Instruct-v0.2", device="cuda:0", model_kwargs={"load_in_8bit": True})
+model = outlines.models.transformers("mistralai/Mistral-7B-Instruct-v0.2", device="cuda:0")
 print("Model loaded.")
 generator = outlines.generate.json(model, schema)
 character = generator("Give me a character description")
 print(character)
 ```
+</details>
+
+```python
+from faster_outlines.fsm import RegexGuide, TokenVocabulary
+from faster_outlines.sampling import BaseLogitsProcessor
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+model = AutoModelForCausalLM.from_pretrained("NousResearch/Hermes-2-Pro-Llama-3-8B")
+tokenizer = AutoTokenizer.from_pretrained("NousResearch/Hermes-2-Pro-Llama-3-8B")
+
+vocab = TokenVocab(
+    tokenizer.get_vocab(),
+    tokenizer.eos_token_id,
+    set(tokenizer.all_special_tokens)
+)
+
+# Regex for an Email adress
+regex = r"""[a-z0-9!#$%&'*+/=?^_{|}~-]+(?:.[a-z0-9!#$%&'*+/=?^_{|}~-]+)*@(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?"""
+
+guide = RegexGuide(regex, vocab)
+
+m = """<|im_start|>user\nWrite me a funny email adress.\n<|im_end|>\n<|im_start|>assistant\n"""
+
+inputs = tokenizer.encode(m, return_tensors="pt")
+
+logits_processor = BaseLogitsProcessor(guide)
+
+print(
+    model.generate(
+        inputs.to("cuda"),
+        max_new_tokens=100,
+        logits_processors=[logits_processor],
+        do_sample=True
+    )
+)
+```
 
 ## Performance Comparison
 
-![Performance Graph](https://raw.githubusercontent.com/unaidedelf8777/faster-outlines/main/assets/benchmark.png)
-<figcaption style="text-align: center;">Latest as of 7.13.2024 (0.0.46)</figcaption>
+![Performance Graph](./assets/benchmark.png)
 
-The graph above illustrates the performance advantage of faster_outlines over the standard Outlines library. As the complexity of regex patterns increases (measured by the number of FSM states), faster_outlines maintains significantly lower processing times.
+faster-outlines's regex index compilation time is the time taken to fully compile the index, not the time until the index is usable for sampling. The time until the index is usable for sampling is normally not more than 1ms more than the time taken to compile the regex to a FSM using [interegular](https://github.com/MegaIng/interegular).
 
-For even faster compilation times on machines with more powerful CPUs ( such as inference servers ), the number of threads is automatically scaled according to the number of available threads. scaling rules are as follows: 
+The raw benchmark results are located in json at `bench/benchmark_results.json`, and the graph is made with `bench/makePrettyGraph.js`
 
-- 1-4 CPU threads: Uses 1 thread
-- 5-8 CPU threads: Uses 2 threads
-- 9+ CPU threads: Uses ~1/4 of available threads (min 2, max 16)
+## Caching and Env vars
 
-However, if you would like to manually control the number of threads used, you can do so via environment variable:
+`faster-outlines` caches all generated FSMs in a Rust-based LRU Cache. The cache can be controlled using the following environment variables:
 
-```bash
-export FASTER_OUTLINES_NUM_THREADS=<num-threads>
-```
-
-Please note that setting the number of threads to a number higher than the number of cores / logical threads on your machine **WILL DETERIORATE PERFORMANCE**, not improve it.
-
-If you would like to test performance at different thread counts on your machine, you can use the script at `tests/test_fsm_comp_time.py`, by first running the script using the automatic thread count ( or what ever you are currently using ), and then the number of threads you are thinking of using.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FASTER_OUTLINES_CACHE_SIZE` | 50 | Maximum number of FSMs to cache |
+| `FASTER_OUTLINES_DISABLE_CACHE` | false | Disable caching ("true"/"1"/"yes") |
 <br>
 
+## Docs
 
-## Compatibility
-
-`faster_outlines` is designed to be fully compatible with the Outlines API, however, currently only full support for version 0.0.46 ( latest as of 7/13/24 ) can be garunteed.
+Most of the rust code is thoroughly documented in terms of data structure and methodology. The rust docs and the python binding code, aswell as the `.pyi` file for the compiled portion of the lib should be sufficient for most. If you have any questions which the comments and code don't aswer feel free to open an issue. 
 
 ## Contributing & Support
-
-We welcome contributions!
+Contributions welcomed!
 
 If you would like to support the further development and more speed improvements for faster_outlines, please consider supporting us on Github sponsors, or make a donation using the *Buy-Me-A-Coffee* link below!
 
 <div align="center" style="margin-top: 2em; margin-bottom: 1em;">
-<a href="https://www.buymeacoffee.com/unaidedelf8777"><img src="https://img.buymeacoffee.com/button-api/?text=Buy me a pizza&emoji=🍕&slug=unaidedelf8777&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" /></a>
+<a href="https://www.buymeacoffee.com/unaidedelf8777"><img src="https://img.buymeacoffee.com/button-api/?text=Buy me a pizza&emoji=🍕&slug=unaidedelf8777&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff"/></a>
 </div>
 
 # Issues 
@@ -157,6 +197,8 @@ If you have an issue with the lib, please, please open a github issue describing
 
 - This project builds upon the excellent work of the Outlines library.
 
+## Copyright
+This work is dual licensed under apache-2.0 and MIT. find more info in the LICENSE file.
 
 ***Citations***:
 

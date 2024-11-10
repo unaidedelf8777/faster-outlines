@@ -1,77 +1,61 @@
-# Copyright 2024 Nathan Hoos
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-from .fsm import (
-    create_fsm_index_tokenizer,
-    Write,
-    Generate
-)
+import sys
+from .fsm import RegexGuide, Write, Generate
 
 
-def get_next_instruction_regexfsm(
-    self,
-    state: int
-    ):
-    # self.states_to_token_maps = a LazyFSMIndex instance
-    return self.states_to_token_maps.get_next_instruction(state)
-
-def get_next_state_regexfsm(
-    self,
-    state: int,
-    token_id: int
-    ):
-    # self.states_to_token_maps = a LazyFSMIndex instance
-    return self.states_to_token_maps.get_next_state(state, token_id)
-    
-def patch(outlines_module): 
+def patch(outlines_module, save_to_sys_modules=True):
     """
-    Patch the vanilla `outlines` module such that it uses the `faster-outlines` backend.
+    Patch the vanilla `outlines` module to use the `faster-outlines` backend.
 
-    This function replaces the original create_states_mapping function in 
-    outlines_module.fsm.guide with the create_fsm_index_tokenizer function. 
-    This modification is done in-place and affects the module globally.
-    If needed, this function also returns the modified module, in case
-    your design pattern prefers this.
+    This function modifies the `outlines_module` in-place by replacing specific
+    functions and classes with the patched versions. Optionally, it can save
+    the modified module back into `sys.modules`.
 
     Parameters:
     -----------
      - outlines_module : module
-        The outlines module to be patched. This should be the module object,
+        The outlines module to be patched. This should be the actual module object,
         not a string name.
+
+     - save_to_sys_modules : bool, optional
+        If True (default), the modified outlines module will be saved to sys.modules.
+        If False, the module will be patched but not saved to sys.modules.
 
     Returns:
     --------
      - module
-        The patched outlines module. Note that this is the same object that
-        was passed in, modified in-place.
+        The patched outlines module. This is the same object that was passed in,
+        modified in-place.
+
+    Raises:
+    -------
+     - ImportError
+        If the outlines module is not found in sys.modules.
 
     Usage:
     --------------
     >>> import outlines
-    >>> patched_outlines = patch(outlines) 
-    >>> # Or just `patch(outlines)`
-    >>> # Now, all uses of the module will use the backend from `faster_outlines` instead of default.
+    >>> patched_outlines = patch(outlines)
+    >>> # Now, all uses of the module will use the backend from `faster_outlines`.
     """
+
     try:
+        if "outlines" not in sys.modules:
+            raise ImportError(
+                "The outlines module is not loaded in sys.modules. Please import it before patching."
+            )
+
         outlines_module.fsm.guide.Write = Write
         outlines_module.fsm.guide.Generate = Generate
-        outlines_module.fsm.guide.create_states_mapping = create_fsm_index_tokenizer
-        outlines_module.fsm.guide.RegexGuide.get_next_state = get_next_state_regexfsm
-        outlines_module.fsm.guide.RegexGuide.get_next_instruction = get_next_instruction_regexfsm
-        
+
+        outlines_module.fsm.guide.RegexGuide = RegexGuide
+
+        if save_to_sys_modules:
+            sys.modules["outlines"] = outlines_module
+            sys.modules["outlines.fsm"] = outlines_module.fsm
+            sys.modules["outlines.fsm.guide"] = outlines_module.fsm.guide
+
     except Exception as e:
-        print("ERROR! patching outlines module failed.")
+        print("ERROR! Patching outlines module failed.")
         raise e
-    
+
     return outlines_module

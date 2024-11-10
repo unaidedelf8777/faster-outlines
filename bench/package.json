@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "canvas": "^2.11.2",
+    "chart.js": "^4.4.4",
+    "fs": "^0.0.1-security",
+    "quickchart-js": "^3.1.3"
+  }
+}
