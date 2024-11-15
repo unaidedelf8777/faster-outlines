@@ -7,7 +7,7 @@ CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 metadata = {
     'name': "faster_outlines",
-    'version': "2024.11.10",
+    'version': "2024.11.14",
     'description': "Faster, lazy backend for the `Outlines` library.",
     'long_description': "", 
     'authors': ["Nathan Hoos"],

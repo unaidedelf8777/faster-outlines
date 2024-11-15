@@ -1,6 +1,6 @@
 [project]
 name = "faster_outlines"
-version = "2024.11.10"
+version = "2024.11.14"
 description = "Faster, lazy backend for the `Outlines` library"
 authors = [
 { name = "Nathan Hoos" }
@@ -15,7 +15,7 @@ dependencies = [
     "torch",
     "interegular"
 ]
-requires-python = '>=3.10'
+requires-python = '>=3.9'
 
 [project.optional-dependencies]
 dev = [
